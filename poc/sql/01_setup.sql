@@ -62,7 +62,10 @@ GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER TO ROLE SYSADMIN;  -- <-- EDIT THIS RO
 -- Step 2: Create database, schema, warehouse
 -- ---------------------------------------------------------------------------
 CREATE DATABASE IF NOT EXISTS IDENTIFIER($poc_db);
-CREATE SCHEMA IF NOT EXISTS IDENTIFIER($poc_db || '.' || $poc_schema);
+USE DATABASE IDENTIFIER($poc_db);
+
+CREATE SCHEMA IF NOT EXISTS IDENTIFIER($poc_schema);
+USE SCHEMA IDENTIFIER($poc_schema);
 
 CREATE WAREHOUSE IF NOT EXISTS IDENTIFIER($poc_warehouse)
     WAREHOUSE_SIZE = 'X-SMALL'
@@ -71,8 +74,6 @@ CREATE WAREHOUSE IF NOT EXISTS IDENTIFIER($poc_warehouse)
     INITIALLY_SUSPENDED = TRUE
     COMMENT = 'AI_EXTRACT POC — X-Small is optimal (larger does not improve AI_EXTRACT performance)';
 
-USE DATABASE IDENTIFIER($poc_db);
-USE SCHEMA IDENTIFIER($poc_schema);
 USE WAREHOUSE IDENTIFIER($poc_warehouse);
 
 -- ---------------------------------------------------------------------------

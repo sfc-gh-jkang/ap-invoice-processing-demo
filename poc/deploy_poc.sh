@@ -38,7 +38,7 @@ import snowflake.connector
 conn = snowflake.connector.connect(connection_name='${CONNECTION}')
 with open('$tmp_file') as f:
     sql = f.read()
-for cur in conn.execute_string(sql):
+for cur in conn.execute_string(sql, remove_comments=True):
     pass
 conn.close()
 "

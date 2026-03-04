@@ -26,6 +26,7 @@ This kit walks you through a complete proof-of-concept:
 - [Troubleshooting](#troubleshooting)
 - [Cost Estimate](#cost-estimate)
 - [Cleanup](#cleanup)
+- [Validating the Deployment (Tests)](#validating-the-deployment-tests)
 - [Next Steps](#next-steps)
 
 ---
@@ -457,6 +458,9 @@ ALTER TASK EXTRACT_NEW_DOCUMENTS_TASK SUSPEND;
 ```
 ai_extract_poc/
 ├── README.md                              # This guide
+├── deploy_poc.sh                          # Automated deploy script (optional)
+├── teardown_poc.sql                       # Drop all POC objects
+├── pyproject.toml                         # Python dependencies (tests + app)
 ├── sql/
 │   ├── 01_setup.sql                       # Database, schema, warehouse, stage
 │   ├── 02_tables.sql                      # Document tracking + extraction tables
@@ -465,14 +469,26 @@ ai_extract_poc/
 │   ├── 05_views.sql                       # Analytical views for dashboard
 │   ├── 06_automate.sql                    # Stream + Task automation (optional)
 │   └── 07_deploy_streamlit.sql            # Deploy the Streamlit dashboard (optional)
-└── streamlit/
-    ├── streamlit_app.py                   # Landing page + pipeline overview
-    ├── config.py                          # Dynamic config (zero hardcoded values)
-    ├── environment.yml                    # Container Runtime dependencies
-    └── pages/
-        ├── 0_Dashboard.py                 # KPI cards + recent documents
-        ├── 1_Document_Viewer.py           # Browse, filter, drill-down + PDF viewer
-        └── 2_Analytics.py                 # Charts: by sender, monthly, aging, top items
+├── streamlit/
+│   ├── streamlit_app.py                   # Landing page + pipeline overview
+│   ├── config.py                          # Dynamic config (zero hardcoded values)
+│   ├── environment.yml                    # Container Runtime dependencies
+│   └── pages/
+│       ├── 0_Dashboard.py                 # KPI cards + recent documents
+│       ├── 1_Document_Viewer.py           # Browse, filter, drill-down + PDF viewer
+│       └── 2_Analytics.py                 # Charts: by sender, monthly, aging, top items
+└── tests/
+    ├── test_deployment_readiness.py       # Pre-flight checks (Cortex, encryption, EAI)
+    ├── test_sql_integration.py            # All SQL objects exist with correct schema
+    ├── test_extraction_pipeline.py        # Live AI_EXTRACT, stored proc, idempotency
+    ├── test_data_validation.py            # Data quality, parse failures, edge cases
+    └── test_e2e/
+        ├── helpers.py                     # Shared Playwright utilities
+        ├── conftest.py                    # E2E fixtures + screenshot-on-failure
+        ├── test_poc_landing.py            # Landing page tests
+        ├── test_poc_dashboard.py          # Dashboard page tests
+        ├── test_poc_document_viewer.py    # Document Viewer page tests
+        └── test_poc_analytics.py          # Analytics page tests
 ```
 
 **Run scripts in order: 01 → 02 → (upload files) → 03 → 04 → 05 → (optionally 06, 07)**
@@ -537,6 +553,143 @@ DROP COMPUTE POOL IF EXISTS AI_EXTRACT_POC_POOL;
 -- Optionally remove the EAI and network rule (if no other apps use them)
 -- DROP EXTERNAL ACCESS INTEGRATION IF EXISTS PYPI_ACCESS_INTEGRATION;
 -- DROP NETWORK RULE IF EXISTS PYPI_NETWORK_RULE;
+```
+
+---
+
+## Validating the Deployment (Tests)
+
+The POC includes a test suite (147 tests) that verifies every SQL object, data quality, extraction pipeline, and Streamlit page. Running tests after deployment proves everything works end-to-end.
+
+> **If you only ran the SQL scripts in Snowsight** (steps 1-7), the tests are optional but recommended. They catch issues like missing grants, encryption mismatches, and parse failures that you might not notice manually.
+
+### Local Tool Prerequisites
+
+These tools are only needed for the automated deploy script (`deploy_poc.sh`) and/or running the test suite. If you ran the SQL scripts manually in Snowsight, you only need tools for the tests.
+
+| Tool | Version | What It's For | Install |
+|---|---|---|---|
+| **Python** | >= 3.11 | Test runner, deploy script fallback | `brew install python@3.12` (macOS) or [python.org](https://www.python.org/downloads/) |
+| **uv** | latest | Python package/venv manager (installs deps, runs pytest) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| **Snowflake CLI** (`snow`) | >= 3.0 | `deploy_poc.sh` uses `snow sql` to run SQL files | `uv tool install snowflake-cli` |
+| **Playwright** | (auto-installed) | E2E browser tests for Streamlit pages | `uv run playwright install chromium` (after `uv sync`) |
+
+### Snowflake Connection Config
+
+The tests and deploy script connect to Snowflake using a **named connection** in `~/.snowflake/config.toml`. Create this file if it doesn't exist:
+
+```toml
+# ~/.snowflake/config.toml
+[connections.my_account]
+account = "YOUR_ORG-YOUR_ACCOUNT"
+user = "YOUR_USERNAME"
+authenticator = "externalbrowser"          # opens browser for SSO login
+# OR use password auth:
+# authenticator = "snowflake"
+# password = "YOUR_PASSWORD"
+warehouse = "AI_EXTRACT_WH"
+database = "AI_EXTRACT_POC"
+schema = "DOCUMENTS"
+role = "ACCOUNTADMIN"
+```
+
+Then tell the POC which connection to use:
+
+```bash
+# Option A: environment variable (recommended)
+export POC_CONNECTION=my_account
+
+# Option B: pass to deploy script directly
+./poc/deploy_poc.sh --connection my_account
+```
+
+The default connection name is `aws_spcs`. Override it with the `POC_CONNECTION` environment variable.
+
+### Install Test Dependencies
+
+```bash
+cd poc
+
+# Create venv and install all dependencies (test + app)
+uv sync --all-groups
+
+# Install Playwright browser (needed for E2E tests only)
+uv run playwright install chromium
+```
+
+### Streamlit Secrets (E2E Tests Only)
+
+The E2E tests run a local Streamlit server that needs Snowflake credentials. Create `poc/streamlit/.streamlit/secrets.toml`:
+
+```toml
+# poc/streamlit/.streamlit/secrets.toml
+[connections.snowflake]
+account = "YOUR_ORG-YOUR_ACCOUNT"
+user = "YOUR_USERNAME"
+authenticator = "externalbrowser"
+warehouse = "AI_EXTRACT_WH"
+database = "AI_EXTRACT_POC"
+schema = "DOCUMENTS"
+role = "ACCOUNTADMIN"
+```
+
+> This file is gitignored and never committed. Each person running E2E tests creates their own.
+
+### Running the Tests
+
+From the `poc/` directory:
+
+**Tier 1 — SQL + Data Quality tests only** (~60 seconds, no browser needed):
+
+```bash
+uv run pytest tests/test_sql_integration.py tests/test_data_validation.py tests/test_deployment_readiness.py tests/test_extraction_pipeline.py -v
+```
+
+**Tier 2 — Full suite including E2E browser tests** (~3 minutes):
+
+```bash
+uv run pytest tests/ -v
+```
+
+**Tier 3 — Clean-room: teardown, redeploy, test** (proves scripts work from scratch):
+
+```bash
+# 1. Tear down existing POC
+snow sql -c my_account -f poc/teardown_poc.sql
+
+# 2. Redeploy from scratch
+./poc/deploy_poc.sh --connection my_account
+
+# 3. Run all tests
+cd poc && uv run pytest tests/ -v
+```
+
+### What the Tests Verify
+
+| Test File | Count | What It Checks |
+|---|---|---|
+| `test_deployment_readiness.py` | 12 | Pre-flight: Cortex access, SSE encryption, staged files, EAI, compute pool, Streamlit stage |
+| `test_sql_integration.py` | 42 | Every SQL object: database, schema, warehouse, stages, tables, columns, PKs, views, stream, task, stored proc |
+| `test_extraction_pipeline.py` | 16 | Live AI_EXTRACT calls (entity + table mode), stored procedure execution, idempotency, LATERAL FLATTEN |
+| `test_data_validation.py` | 43 | Data quality: completeness, no NULLs in required fields, amounts > 0, valid dates, no orphans, no duplicates |
+| `test_e2e/` (4 files) | 34 | Playwright browser tests: every Streamlit page loads, no exceptions, KPIs show correct values, charts render |
+
+### Interpreting Test Failures
+
+The tests are designed to give **actionable error messages**. Examples:
+
+```
+FAILED test_deployment_readiness.py::TestCortexAvailability::test_cortex_user_role_granted
+  SNOWFLAKE.CORTEX_USER not granted to ACCOUNTADMIN.
+  Run: GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER TO ROLE ACCOUNTADMIN;
+
+FAILED test_deployment_readiness.py::TestStageEncryption::test_document_stage_is_snowflake_sse
+  DOCUMENT_STAGE uses client-side encryption. AI_EXTRACT requires SNOWFLAKE_SSE.
+  You must recreate the stage: DROP STAGE DOCUMENT_STAGE;
+  CREATE STAGE DOCUMENT_STAGE DIRECTORY=(ENABLE=TRUE) ENCRYPTION=(TYPE='SNOWFLAKE_SSE')
+
+FAILED test_data_validation.py::TestEdgeCases::test_no_negative_amounts
+  3 records have negative amounts — REGEXP_REPLACE may be mishandling currency formatting
 ```
 
 ---
