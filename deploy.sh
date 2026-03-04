@@ -14,9 +14,52 @@ CONNECTION_FLAG="-c $CONNECTION"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# ---------- Helper: run a SQL file with env var substitution ----------
+# Replaces hardcoded defaults in SQL files with the user's chosen names.
+# Files containing $$ (dollar-quoted blocks) use Python connector instead of
+# snow sql, which has template rendering issues with $$.
+run_sql() {
+    local sql_file="$1"
+    local tmp_file
+    tmp_file=$(mktemp)
+    sed \
+        -e "s/AP_DEMO_DB/${DB}/g" \
+        -e "s/AP_DEMO_WH/${WH}/g" \
+        -e "s/AP_DEMO_POOL/${COMPUTE_POOL}/g" \
+        -e "s/SCHEMA AP;/SCHEMA ${SCHEMA};/g" \
+        -e "s/SCHEMA AP /SCHEMA ${SCHEMA} /g" \
+        -e "s/\.AP\./\.${SCHEMA}\./g" \
+        -e "s/\.AP;/\.${SCHEMA};/g" \
+        -e "s/\.AP /\.${SCHEMA} /g" \
+        -e "s/_SCHEMA = 'AP'/_SCHEMA = '${SCHEMA}'/g" \
+        -e "s/SCHEMA_NAME = 'AP'/SCHEMA_NAME = '${SCHEMA}'/g" \
+        "$sql_file" > "$tmp_file"
+
+    if grep -q '\$\$' "$tmp_file"; then
+        # Dollar-quoted blocks break snow sql template rendering — use Python
+        python3 -c "
+import snowflake.connector
+conn = snowflake.connector.connect(connection_name='${CONNECTION}')
+with open('$tmp_file') as f:
+    sql = f.read()
+for cur in conn.execute_string(sql):
+    pass
+conn.close()
+"
+    else
+        snow sql $CONNECTION_FLAG -f "$tmp_file"
+    fi
+    rm -f "$tmp_file"
+}
+
 echo "=============================================="
 echo " AP Invoice Processing Demo — Deploy"
 echo "=============================================="
+echo "  Database:     ${DB}"
+echo "  Schema:       ${SCHEMA}"
+echo "  Warehouse:    ${WH}"
+echo "  Compute Pool: ${COMPUTE_POOL}"
+echo "  Connection:   ${CONNECTION}"
 
 # ---------- Step 1: Generate invoices ----------
 echo ""
@@ -39,7 +82,7 @@ echo "   Created 5 demo invoices in data/demo_invoices/"
 echo ""
 echo "[2/6] Creating Snowflake objects (DB, schema, warehouse, stage, compute pool)..."
 
-snow sql $CONNECTION_FLAG -f sql/01_setup.sql
+run_sql sql/01_setup.sql
 
 echo "   Objects created."
 
@@ -47,7 +90,7 @@ echo "   Objects created."
 echo ""
 echo "[3/6] Creating tables and seeding vendor data..."
 
-snow sql $CONNECTION_FLAG -f sql/02_tables.sql
+run_sql sql/02_tables.sql
 
 echo "   Tables created."
 
@@ -89,23 +132,23 @@ echo ""
 echo "[5/6] Running batch AI_EXTRACT on initial 100 invoices..."
 echo "   (This may take several minutes depending on warehouse size)"
 
-snow sql $CONNECTION_FLAG -f sql/03_extract.sql
+run_sql sql/03_extract.sql
 
 echo "   Extraction complete."
 
 # Create task and stream for new files
 echo "   Setting up automated extraction task..."
-snow sql $CONNECTION_FLAG -f sql/04_task.sql
+run_sql sql/04_task.sql
 
 # Create analytical views
 echo "   Creating analytical views..."
-snow sql $CONNECTION_FLAG -f sql/05_views.sql
+run_sql sql/05_views.sql
 
 echo "   Views created."
 
 # Create invoice generation UDTF + stored proc
 echo "   Creating invoice generation UDTF..."
-snow sql $CONNECTION_FLAG -f sql/07_generate_udf.sql
+run_sql sql/07_generate_udf.sql
 
 echo "   Invoice generator ready."
 
@@ -118,6 +161,8 @@ snow sql $CONNECTION_FLAG -q "
     USE DATABASE ${DB};
     USE SCHEMA ${SCHEMA};
     PUT file://${SCRIPT_DIR}/streamlit/streamlit_app.py @STREAMLIT_STAGE/
+        AUTO_COMPRESS = FALSE OVERWRITE = TRUE;
+    PUT file://${SCRIPT_DIR}/streamlit/config.py @STREAMLIT_STAGE/
         AUTO_COMPRESS = FALSE OVERWRITE = TRUE;
     PUT file://${SCRIPT_DIR}/streamlit/pyproject.toml @STREAMLIT_STAGE/
         AUTO_COMPRESS = FALSE OVERWRITE = TRUE;

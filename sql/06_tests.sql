@@ -1,6 +1,7 @@
 -- =============================================================================
 -- AP Invoice Demo — Comprehensive E2E Test Suite
--- Run: snow sql -f sql/06_tests.sql -c aws_spcs
+-- Run: snow sql -f sql/06_tests.sql -c <connection>
+-- Or via deploy.sh which substitutes DB/schema/warehouse names automatically.
 --
 -- Tests are grouped into sections:
 --   T01-T08   Infrastructure (database, schema, warehouse, stages, compute pool)

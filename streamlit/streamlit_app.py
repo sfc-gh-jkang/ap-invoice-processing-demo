@@ -247,5 +247,8 @@ monthly trends, category insights
 
 **Process New** — Watch the pipeline in action:
 generate invoices, trigger extraction, see results
+
+**AI Extract Lab** — Interactive prompt builder for
+AI_EXTRACT: templates, visual builder, raw JSON editor
 """
     )

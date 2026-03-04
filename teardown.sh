@@ -14,6 +14,11 @@ CONNECTION_FLAG="-c $CONNECTION"
 echo "=============================================="
 echo " AP Invoice Processing Demo — Teardown"
 echo "=============================================="
+echo "  Database:     ${DB}"
+echo "  Schema:       ${SCHEMA}"
+echo "  Warehouse:    ${WH}"
+echo "  Compute Pool: ${COMPUTE_POOL}"
+echo "  Connection:   ${CONNECTION}"
 
 # ---------- Drop task first (must be done before other objects) ----------
 echo ""
