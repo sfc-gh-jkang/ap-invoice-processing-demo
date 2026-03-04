@@ -27,6 +27,7 @@ This kit walks you through a complete proof-of-concept:
 - [Cost Estimate](#cost-estimate)
 - [Cleanup](#cleanup)
 - [Validating the Deployment (Tests)](#validating-the-deployment-tests)
+- [Using Your Own Documents](#using-your-own-documents)
 - [Next Steps](#next-steps)
 
 ---
@@ -407,7 +408,7 @@ The `streamlit/` folder contains a 3-page Streamlit in Snowflake app. Deployment
 
 3. **Edit role references** in `07_deploy_streamlit.sql`:
    - Line 63: `USE ROLE ACCOUNTADMIN;` — needed for creating the EAI
-   - Line 76: `USE ROLE SYSADMIN;` — change to your working role
+   - Line 76: `USE ROLE ACCOUNTADMIN;` — change to the role that owns `AI_EXTRACT_POC`
 
 4. **Open the app**: Navigate to **Snowsight > Projects > Streamlit > AI_EXTRACT_DASHBOARD**
 
@@ -691,6 +692,246 @@ FAILED test_deployment_readiness.py::TestStageEncryption::test_document_stage_is
 FAILED test_data_validation.py::TestEdgeCases::test_no_negative_amounts
   3 records have negative amounts — REGEXP_REPLACE may be mishandling currency formatting
 ```
+
+---
+
+## Using Your Own Documents
+
+Once the POC is deployed and tests pass with the sample invoices, you're ready to swap in your own files. This section walks through the complete process — from uploading your documents to seeing extracted data in the dashboard.
+
+### Overview
+
+| Phase | What You Do | Time |
+|---|---|---|
+| 1. Prepare | Gather 5-20 sample documents and decide which fields to extract | 10 min |
+| 2. Upload | Stage your documents in Snowflake | 5 min |
+| 3. Tune prompts | Test AI_EXTRACT on one file and refine your questions | 10-15 min |
+| 4. Batch extract | Run extraction across all your documents | 5-10 min |
+| 5. Verify | Query the results and check accuracy | 5 min |
+
+### Phase 1: Prepare Your Documents
+
+1. **Collect 5-20 representative files** of the type you want to extract from (invoices, contracts, receipts, claims, etc.). Include a mix of formats and layouts if your documents come from different senders.
+
+2. **Define the fields you need.** Write down 5-10 header-level fields and any tabular data:
+
+   | Document Type | Example Header Fields | Example Table Columns |
+   |---|---|---|
+   | Invoices | vendor, invoice #, date, due date, PO #, total | line item, qty, unit price, amount |
+   | Contracts | parties, effective date, term, value, governing law | milestone, deliverable, date, payment |
+   | Receipts | store, date, total, payment method | item, qty, price |
+   | Medical claims | patient, provider, date of service, diagnosis, total | procedure code, description, charge |
+
+3. **Supported file types:** PDF, PNG, JPEG/JPG, DOCX/DOC, PPTX/PPT, EML, HTML/HTM, TXT, TIF/TIFF, BMP, GIF, WEBP, MD. Max 125 pages and 100 MB per file.
+
+### Phase 2: Clear Sample Data and Upload Your Files
+
+The POC was deployed with sample invoices. You need to clear those and upload your own files.
+
+**Option A — Start fresh (recommended for clean results):**
+
+```sql
+-- Remove sample data from tables (keeps the table structure)
+TRUNCATE TABLE EXTRACTED_TABLE_DATA;
+TRUNCATE TABLE EXTRACTED_FIELDS;
+TRUNCATE TABLE RAW_DOCUMENTS;
+
+-- Remove sample files from stage
+REMOVE @DOCUMENT_STAGE;
+```
+
+**Option B — Keep sample data and add yours alongside:**
+
+Skip the truncation above. Your documents will be processed alongside the existing samples. This is fine for experimentation but can clutter the dashboard.
+
+**Upload your documents** using any of these methods:
+
+```sql
+-- Snowsight UI: Data > Databases > AI_EXTRACT_POC > DOCUMENTS > Stages > DOCUMENT_STAGE > + Files
+
+-- Snowflake CLI:
+-- snow stage copy /path/to/your/docs/*.pdf @AI_EXTRACT_POC.DOCUMENTS.DOCUMENT_STAGE --overwrite
+
+-- SnowSQL:
+-- PUT file:///path/to/your/docs/*.pdf @AI_EXTRACT_POC.DOCUMENTS.DOCUMENT_STAGE AUTO_COMPRESS=FALSE;
+```
+
+After uploading, refresh the directory and register files:
+
+```sql
+ALTER STAGE DOCUMENT_STAGE REFRESH;
+
+-- Verify your files are staged
+SELECT * FROM DIRECTORY(@DOCUMENT_STAGE) ORDER BY LAST_MODIFIED DESC;
+
+-- Register new files into RAW_DOCUMENTS
+INSERT INTO RAW_DOCUMENTS (file_name, file_path, staged_at)
+SELECT
+    RELATIVE_PATH,
+    '@DOCUMENT_STAGE/' || RELATIVE_PATH,
+    CURRENT_TIMESTAMP()
+FROM DIRECTORY(@DOCUMENT_STAGE) d
+WHERE NOT EXISTS (
+    SELECT 1 FROM RAW_DOCUMENTS r WHERE r.file_name = d.RELATIVE_PATH
+);
+
+-- Confirm registration
+SELECT COUNT(*) AS total_registered,
+       COUNT_IF(extracted = FALSE) AS pending_extraction
+FROM RAW_DOCUMENTS;
+```
+
+### Phase 3: Tune Prompts on a Single File
+
+This is the most important step. Open **`sql/03_test_single_file.sql`** and edit the prompts for your document type.
+
+```sql
+-- Set to one of YOUR file names
+SET test_file = 'your_document.pdf';
+
+-- Edit the AI_EXTRACT questions to match YOUR fields
+SELECT AI_EXTRACT(
+    TO_FILE('@DOCUMENT_STAGE', $test_file),
+    {
+        'field_1': 'What is the vendor or sender name?',
+        'field_2': 'What is the document or invoice number?',
+        'field_3': 'What is the PO or reference number? Return NULL if not present.',
+        'field_4': 'What is the document date? Return in YYYY-MM-DD format.',
+        'field_5': 'What is the due date? Return in YYYY-MM-DD format. Return NULL if not present.',
+        'field_6': 'What are the payment terms (e.g., Net 30)?',
+        'field_7': 'Who is the recipient or bill-to party?',
+        'field_8': 'What is the subtotal before tax? Return as a number only.',
+        'field_9': 'What is the tax amount? Return as a number only. Return 0 if not present.',
+        'field_10': 'What is the total amount due? Return as a number only.'
+    }
+) AS extraction;
+```
+
+**Review the JSON output carefully.** Check:
+
+- Are values correct compared to the source document?
+- Are dates in `YYYY-MM-DD` format?
+- Are numbers clean (no `$`, commas, or currency symbols)?
+- Do missing fields return `NULL` instead of hallucinated values?
+
+Iterate on the prompts until the output is accurate. See [Customizing for Your Document Type](#customizing-for-your-document-type) for prompt engineering tips and examples for contracts, receipts, and other document types.
+
+**Test table extraction too** (if your documents have line items):
+
+```sql
+SELECT AI_EXTRACT(
+    TO_FILE('@DOCUMENT_STAGE', $test_file),
+    {
+        'line_items': {
+            'col_1': 'What is the item description or product name?',
+            'col_2': 'What is the quantity? Return as a number only.',
+            'col_3': 'What is the unit price? Return as a number only.',
+            'col_4': 'What is the line total? Return as a number only.',
+            'col_5': 'What is the item code or SKU? Return NULL if not present.'
+        }
+    }
+) AS extraction;
+```
+
+### Phase 4: Batch Extract All Documents
+
+Once single-file results look good, open **`sql/04_batch_extract.sql`**.
+
+> **Copy your tuned prompts** from Phase 3 into this script. The prompts in `04_batch_extract.sql` must match exactly what you validated on a single file.
+
+Run the script. It processes all files in `RAW_DOCUMENTS` where `is_extracted = FALSE`.
+
+**Monitor progress:**
+
+```sql
+-- Check extraction status
+SELECT
+    COUNT(*) AS total,
+    COUNT_IF(is_extracted) AS extracted,
+    COUNT_IF(NOT is_extracted) AS pending
+FROM RAW_DOCUMENTS;
+
+-- Preview extracted data
+SELECT * FROM EXTRACTED_FIELDS ORDER BY extracted_at DESC LIMIT 10;
+SELECT * FROM EXTRACTED_TABLE_DATA ORDER BY extracted_at DESC LIMIT 20;
+```
+
+**Runtime guide:** ~3-6 seconds per single-page document on an X-SMALL warehouse. A batch of 100 single-page documents typically completes in 5-10 minutes.
+
+### Phase 5: Verify Results and Refresh Views
+
+After extraction completes, refresh the analytical views and verify:
+
+```sql
+-- Views automatically reflect the latest data (they're views, not materialized)
+-- Query them directly:
+
+-- Pipeline status
+SELECT * FROM V_EXTRACTION_STATUS;
+
+-- All documents with parsed fields
+SELECT * FROM V_DOCUMENT_LEDGER ORDER BY document_date DESC LIMIT 20;
+
+-- Totals by sender/vendor
+SELECT * FROM V_SUMMARY_BY_VENDOR ORDER BY total_amount DESC;
+
+-- Monthly trend
+SELECT * FROM V_MONTHLY_TREND ORDER BY month DESC;
+
+-- Top line items
+SELECT * FROM V_TOP_LINE_ITEMS;
+```
+
+**Spot-check accuracy** by comparing a few rows against the source documents:
+
+```sql
+-- Pick a specific document and compare against the original
+SELECT file_name, field_1 AS vendor, field_2 AS doc_number,
+       field_4 AS doc_date, field_10 AS total
+FROM EXTRACTED_FIELDS
+WHERE file_name = 'your_document.pdf';
+```
+
+If the dashboard is deployed (Step 7), open it in Snowsight — it will automatically show your new data.
+
+### Phase 6: Enable Ongoing Automation (Optional)
+
+If you plan to stage new documents over time, enable the automation pipeline so they are extracted automatically:
+
+```sql
+-- If not already created, run sql/06_automate.sql first
+
+-- Resume the task (it may be suspended)
+ALTER TASK EXTRACT_NEW_DOCUMENTS_TASK RESUME;
+
+-- Upload a new document to test
+-- PUT file:///path/to/new_doc.pdf @DOCUMENT_STAGE AUTO_COMPRESS=FALSE;
+
+-- Register it
+ALTER STAGE DOCUMENT_STAGE REFRESH;
+INSERT INTO RAW_DOCUMENTS (file_name, file_path, staged_at)
+SELECT RELATIVE_PATH, '@DOCUMENT_STAGE/' || RELATIVE_PATH, CURRENT_TIMESTAMP()
+FROM DIRECTORY(@DOCUMENT_STAGE) d
+WHERE NOT EXISTS (SELECT 1 FROM RAW_DOCUMENTS r WHERE r.file_name = d.RELATIVE_PATH);
+
+-- The task will fire within 5 minutes and extract the new document
+-- Or trigger it immediately:
+EXECUTE TASK EXTRACT_NEW_DOCUMENTS_TASK;
+
+-- Verify
+SELECT * FROM EXTRACTED_FIELDS ORDER BY extracted_at DESC LIMIT 5;
+```
+
+### Common Issues When Switching to Your Own Documents
+
+| Issue | Symptom | Fix |
+|---|---|---|
+| Wrong field mapping | `field_1` contains a date instead of vendor name | Edit prompts in `03_test_single_file.sql` and `04_batch_extract.sql` to match your document layout |
+| Amounts have `$` or `,` | Numbers stored as strings like `$1,234.56` | Add `'Return as a number only.'` to your prompt, or rely on the `REGEXP_REPLACE` in the views |
+| Dates in wrong format | `03/15/2024` instead of `2024-03-15` | Add `'Return in YYYY-MM-DD format.'` to your date prompts |
+| Table extraction returns wrong table | Line items come from a summary table instead of the detail table | Add a `description` key: `'description': 'The detailed line item table with product, quantity, and price columns'` |
+| Some documents return NULLs for all fields | AI_EXTRACT can't read the document | Check file format is supported, file isn't corrupted, and file size is under 100 MB. Scanned images may need better resolution. |
+| Duplicate rows after re-running batch | Batch was run twice without marking files as extracted | The `04_batch_extract.sql` script only processes `extracted = FALSE` rows. If you re-ran it manually, deduplicate: `DELETE FROM EXTRACTED_FIELDS WHERE ...` |
 
 ---
 
