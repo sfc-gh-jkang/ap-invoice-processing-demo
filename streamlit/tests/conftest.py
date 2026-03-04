@@ -1,65 +1,43 @@
-"""Shared fixtures for Playwright E2E tests."""
+"""Shared fixtures and helpers for Playwright E2E tests."""
 
 import os
-import subprocess
 import time
-
-import pytest
 import urllib.request
 import urllib.error
+
+import pytest
 
 
 APP_PORT = 8503
 APP_URL = f"http://localhost:{APP_PORT}"
-STARTUP_TIMEOUT = 120  # seconds
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "..", "test-results")
 
 
+def _server_is_up():
+    """Return True if the Streamlit server is responding on APP_PORT."""
+    try:
+        resp = urllib.request.urlopen(APP_URL, timeout=5)
+        return resp.status == 200
+    except (urllib.error.URLError, ConnectionError, OSError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
 @pytest.fixture(scope="session")
 def app_url():
-    """Start the Streamlit app once for the entire test session."""
-    proc = subprocess.Popen(
-        [
-            "uv",
-            "run",
-            "streamlit",
-            "run",
-            "streamlit_app.py",
-            "--server.port",
-            str(APP_PORT),
-            "--server.headless",
-            "true",
-            "--browser.gatherUsageStats",
-            "false",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-
-    # Wait for the server to respond
-    deadline = time.time() + STARTUP_TIMEOUT
-    while time.time() < deadline:
-        try:
-            resp = urllib.request.urlopen(APP_URL, timeout=5)
-            if resp.status == 200:
+    """Return the base URL of the already-running Streamlit server."""
+    if not _server_is_up():
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if _server_is_up():
                 break
-        except (urllib.error.URLError, ConnectionError, OSError):
-            pass
-        time.sleep(2)
-    else:
-        proc.terminate()
-        raise RuntimeError(
-            f"Streamlit app did not start within {STARTUP_TIMEOUT}s on port {APP_PORT}"
-        )
-
-    yield APP_URL
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5)
+            time.sleep(1)
+        else:
+            raise RuntimeError("Streamlit server not reachable from worker")
+    return APP_URL
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +65,8 @@ def wait_for_streamlit(page, selectors=None, timeout=90_000):
         page.wait_for_selector(selectors, timeout=timeout)
     except Exception:
         pass
-    # Extra buffer for Streamlit re-renders
-    page.wait_for_timeout(5000)
+    # Brief buffer for Streamlit re-renders (reduced from 5000ms)
+    page.wait_for_timeout(1000)
 
 
 def get_metric_value(page, label_text):
@@ -130,7 +108,7 @@ def assert_no_exceptions(page):
 
 
 # ---------------------------------------------------------------------------
-# Pytest hooks
+# Pytest hooks — reporting
 # ---------------------------------------------------------------------------
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
