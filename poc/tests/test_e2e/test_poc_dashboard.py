@@ -12,9 +12,11 @@ DASHBOARD_PATH = "/Dashboard"
 def _navigate(page, app_url):
     """Navigate to the Dashboard page with retry on empty render."""
     for attempt in range(3):
-        page.goto(f"{app_url}{DASHBOARD_PATH}", wait_until="networkidle", timeout=90_000)
+        page.goto(f"{app_url}{DASHBOARD_PATH}", wait_until="domcontentloaded", timeout=90_000)
         wait_for_streamlit(page)
         if page.locator('[data-testid="stMetric"]').count() > 0:
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(2000)
             return
         page.wait_for_timeout(2000)
     wait_for_streamlit(page)

@@ -9,7 +9,7 @@ def wait_for_streamlit(page, selectors=None, timeout=90_000):
             '[data-testid="stMarkdown"], '
             '[data-testid="stDataFrame"]'
         )
-    page.wait_for_load_state("networkidle", timeout=timeout)
+    page.wait_for_load_state("domcontentloaded", timeout=timeout)
     try:
         page.wait_for_selector(selectors, timeout=timeout)
     except Exception:

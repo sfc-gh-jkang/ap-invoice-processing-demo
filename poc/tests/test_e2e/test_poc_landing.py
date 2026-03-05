@@ -10,9 +10,11 @@ pytestmark = pytest.mark.e2e
 def _navigate(page, app_url):
     """Navigate to the POC landing page with retry on empty render."""
     for attempt in range(3):
-        page.goto(app_url, wait_until="networkidle", timeout=90_000)
+        page.goto(app_url, wait_until="domcontentloaded", timeout=90_000)
         wait_for_streamlit(page)
         if page.locator('[data-testid="stMetric"]').count() > 0:
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(2000)
             return
         page.wait_for_timeout(2000)
     wait_for_streamlit(page)

@@ -16,6 +16,7 @@ dev = [
     "pytest>=9.0.1",
     "pytest-playwright>=0.7.2",
     "pytest-xdist>=3.5.0",
+    "pytest-timeout>=2.3.1",
     "snowflake-connector-python>=3.6.0",
     "pytest-cov>=4.1.0",
 ]
@@ -23,6 +24,8 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-ra", "-q"]
+timeout = 120
+timeout_method = "thread"
 markers = [
     "smoke: core happy-path tests that should always pass quickly",
     "slow: tests that take >10s (e.g. full navigation, multi-page)",

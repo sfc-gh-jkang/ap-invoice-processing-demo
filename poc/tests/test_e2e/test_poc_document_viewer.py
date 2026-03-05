@@ -12,9 +12,11 @@ VIEWER_PATH = "/Document_Viewer"
 def _navigate(page, app_url):
     """Navigate to the Document Viewer page with retry."""
     for attempt in range(3):
-        page.goto(f"{app_url}{VIEWER_PATH}", wait_until="networkidle", timeout=90_000)
+        page.goto(f"{app_url}{VIEWER_PATH}", wait_until="domcontentloaded", timeout=90_000)
         wait_for_streamlit(page)
         if page.locator('[data-testid="stDataFrame"]').count() > 0:
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(2000)
             return
         page.wait_for_timeout(2000)
     wait_for_streamlit(page)

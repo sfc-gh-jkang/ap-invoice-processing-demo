@@ -2,6 +2,7 @@
 
 import os
 import time
+import threading
 import urllib.request
 import urllib.error
 
@@ -36,7 +37,7 @@ def app_url():
 
 
 # ---------------------------------------------------------------------------
-# Pytest hooks — screenshot on failure
+# Pytest hooks — screenshot on failure (with hard timeout to prevent hangs)
 # ---------------------------------------------------------------------------
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
@@ -48,7 +49,14 @@ def pytest_runtest_makereport(item, call):
             os.makedirs(SCREENSHOT_DIR, exist_ok=True)
             name = item.nodeid.replace("/", "_").replace("::", "__").replace(" ", "_")
             path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
-            try:
-                page.screenshot(path=path, full_page=True)
-            except Exception:
-                pass
+
+            def _take_screenshot():
+                try:
+                    page.screenshot(path=path, full_page=True, timeout=5_000)
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=_take_screenshot, daemon=True)
+            t.start()
+            t.join(timeout=8)
+            # If thread is still alive after 8s, the browser is crashed — abandon it

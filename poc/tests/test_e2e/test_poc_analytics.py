@@ -12,10 +12,13 @@ ANALYTICS_PATH = "/Analytics"
 def _navigate(page, app_url):
     """Navigate to the Analytics page with retry."""
     for attempt in range(3):
-        page.goto(f"{app_url}{ANALYTICS_PATH}", wait_until="networkidle", timeout=90_000)
+        page.goto(f"{app_url}{ANALYTICS_PATH}", wait_until="domcontentloaded", timeout=90_000)
         wait_for_streamlit(page)
         # Check for plotly charts (rendered as iframes or JS containers)
         if page.locator(".js-plotly-plot, iframe").count() > 0:
+            # Scroll to bottom so Streamlit renders all lazy sections
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(2000)
             return
         page.wait_for_timeout(2000)
     wait_for_streamlit(page)
