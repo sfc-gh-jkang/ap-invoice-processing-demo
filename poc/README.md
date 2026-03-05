@@ -650,15 +650,25 @@ From the `poc/` directory:
 uv run pytest tests/test_sql_integration.py tests/test_data_validation.py tests/test_deployment_readiness.py tests/test_extraction_pipeline.py -v
 ```
 
-**Tier 2 — Full suite including E2E browser tests** (~3 minutes):
+**Tier 2 — Full suite including E2E browser tests** (~4 minutes):
 
 ```bash
 # Start the local Streamlit server first (in a separate terminal):
 cd poc && uv run streamlit run streamlit/streamlit_app.py --server.port 8504 --server.headless true
 
-# Then run all tests (in another terminal):
-cd poc && uv run pytest tests/ -v
+# Then run non-E2E tests + each E2E file separately (recommended):
+cd poc
+uv run pytest tests/test_data_validation.py tests/test_deployment_readiness.py tests/test_sql_integration.py tests/test_extraction_pipeline.py -v
+uv run pytest tests/test_e2e/test_poc_analytics.py -v
+uv run pytest tests/test_e2e/test_poc_dashboard.py -v
+uv run pytest tests/test_e2e/test_poc_document_viewer.py -v
+uv run pytest tests/test_e2e/test_poc_landing.py -v
 ```
+
+> **Why run E2E files separately?** Playwright's Chromium process can become unstable after
+> 30+ sequential navigations to a Streamlit app (EPIPE errors). Running each file in its own
+> pytest invocation gives each file a fresh browser process. The non-E2E tests can all run
+> together since they don't use a browser.
 
 > **Why a local server?** The E2E tests use Playwright to drive a real browser against the
 > Streamlit app. The SPCS-hosted dashboard sits behind Snowflake authentication, which
@@ -688,8 +698,20 @@ cd poc && uv run pytest tests/ -v
 | `test_deployment_readiness.py` | 12 | Pre-flight: Cortex access, SSE encryption, staged files, EAI, compute pool, Streamlit stage |
 | `test_sql_integration.py` | 42 | Every SQL object: database, schema, warehouse, stages, tables, columns, PKs, views, stream, task, stored proc |
 | `test_extraction_pipeline.py` | 16 | Live AI_EXTRACT calls (entity + table mode), stored procedure execution, idempotency, LATERAL FLATTEN |
-| `test_data_validation.py` | 43 | Data quality: completeness, no NULLs in required fields, amounts > 0, valid dates, no orphans, no duplicates |
-| `test_e2e/` (4 files) | 34 | Playwright browser tests: every Streamlit page loads, no exceptions, KPIs show correct values, charts render |
+| `test_data_validation.py` | 36 | Data quality: completeness, no NULLs in required fields, amounts > 0, valid dates, no orphans, no duplicates |
+| `test_e2e/` (4 files) | 41 | Playwright browser tests: every Streamlit page loads, no exceptions, KPIs show correct values, charts render |
+
+### Cross-Cloud Verification
+
+This kit has been deployed and tested from scratch on all three Snowflake clouds:
+
+| Cloud | Region | Result |
+|---|---|---|
+| **AWS** | US East 1 (Virginia) | 147/147 pass |
+| **Azure** | East US 2 | 147/147 pass |
+| **GCP** | US East 4 | 147/147 pass |
+
+GCP and other non-primary regions require cross-region inference, which `01_setup.sql` enables automatically.
 
 ### Interpreting Test Failures
 
