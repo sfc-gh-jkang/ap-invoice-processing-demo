@@ -483,6 +483,7 @@ ai_extract_poc/
 ├── README.md                              # This guide
 ├── LICENSE                                # Apache 2.0
 ├── .gitignore                             # Ignores secrets, caches, venvs
+├── Makefile                               # Common commands: make deploy, test, teardown
 ├── deploy_poc.sh                          # Automated deploy script (Quick Start)
 ├── teardown_poc.sql                       # Drop all POC objects (DB, warehouse, compute pool)
 ├── generate_sample_docs.py                # Generate 5 sample invoices (requires reportlab)
@@ -644,7 +645,7 @@ export POC_CONNECTION=my_account
 ./poc/deploy_poc.sh -c my_account
 ```
 
-The default connection name is `aws_spcs`. Override it with the `POC_CONNECTION` env var or the `--connection` / `-c` flag. You can also override the database, schema, and warehouse names:
+The default connection name is `default`. Override it with the `POC_CONNECTION` env var or the `--connection` / `-c` flag. You can also override the database, schema, and warehouse names:
 
 ```bash
 export POC_CONNECTION=my_account   # Snowflake connection name from config.toml
