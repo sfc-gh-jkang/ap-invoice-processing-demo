@@ -8,6 +8,7 @@
 
 USE DATABASE AI_EXTRACT_POC;
 USE SCHEMA DOCUMENTS;
+USE WAREHOUSE AI_EXTRACT_WH;
 
 -- ---------------------------------------------------------------------------
 -- V_EXTRACTION_STATUS: Pipeline monitoring — how many files processed?

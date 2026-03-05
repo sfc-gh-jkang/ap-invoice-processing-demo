@@ -58,6 +58,12 @@ USE ROLE ACCOUNTADMIN;
 -- Replace YOUR_ROLE with the role you'll use for this POC
 GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER TO ROLE SYSADMIN;  -- <-- EDIT THIS ROLE
 
+-- Enable cross-region inference so AI_EXTRACT works in any region.
+-- Without this, accounts in GCP or non-primary AWS/Azure regions will get:
+--   "The model you requested is unavailable in your region"
+-- Safe to run even if your region already supports AI_EXTRACT natively.
+ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = 'ANY_REGION';
+
 -- ---------------------------------------------------------------------------
 -- Step 2: Create database, schema, warehouse
 -- ---------------------------------------------------------------------------

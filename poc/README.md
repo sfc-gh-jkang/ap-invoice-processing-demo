@@ -55,6 +55,8 @@ If your account is **not** in a supported region, run this as ACCOUNTADMIN:
 ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = 'ANY_REGION';
 ```
 
+> **Note:** `01_setup.sql` (and `deploy_poc.sh`) now run this command automatically, so you don't need to do it manually unless running scripts individually.
+
 ### Supported File Types
 
 PDF, PNG, JPEG/JPG, DOCX/DOC, PPTX/PPT, EML, HTML/HTM, TXT/TEXT, TIF/TIFF, BMP, GIF, WEBP, MD
