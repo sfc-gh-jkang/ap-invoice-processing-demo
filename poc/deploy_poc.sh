@@ -101,11 +101,12 @@ echo "   Tables created."
 
 # ---------- Step 3: Stage sample invoices ----------
 echo ""
-echo "[3/7] Staging sample PDF invoices from repo..."
+echo "[3/7] Staging sample PDF invoices..."
 
-# Use demo invoices from the main repo if available
+# Check multiple locations for sample documents (first match wins)
 INVOICE_DIR="$REPO_DIR/data/invoices"
 DEMO_INVOICE_DIR="$REPO_DIR/data/demo_invoices"
+SAMPLE_DIR="$SCRIPT_DIR/sample_documents"
 
 if [ -d "$INVOICE_DIR" ] && [ "$(ls -A "$INVOICE_DIR" 2>/dev/null)" ]; then
     echo "   Uploading invoices from data/invoices/..."
@@ -125,9 +126,18 @@ elif [ -d "$DEMO_INVOICE_DIR" ] && [ "$(ls -A "$DEMO_INVOICE_DIR" 2>/dev/null)" 
             AUTO_COMPRESS = FALSE
             OVERWRITE = TRUE;
     "
+elif [ -d "$SAMPLE_DIR" ] && [ "$(ls -A "$SAMPLE_DIR" 2>/dev/null)" ]; then
+    echo "   Uploading sample invoices from poc/sample_documents/..."
+    snow sql $CONNECTION_FLAG -q "
+        USE DATABASE ${POC_DB};
+        USE SCHEMA ${POC_SCHEMA};
+        PUT file://${SAMPLE_DIR}/*.pdf @${POC_STAGE}
+            AUTO_COMPRESS = FALSE
+            OVERWRITE = TRUE;
+    "
 else
-    echo "   WARNING: No invoice PDFs found in data/invoices/ or data/demo_invoices/"
-    echo "   Generate them first: python3 data/generate_invoices.py"
+    echo "   WARNING: No sample PDFs found."
+    echo "   Generate them: cd poc && python3 generate_sample_docs.py"
     echo "   Or upload your own documents to @${POC_DB}.${POC_SCHEMA}.${POC_STAGE}"
 fi
 

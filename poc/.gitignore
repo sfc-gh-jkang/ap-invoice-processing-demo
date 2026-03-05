@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Test caches
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets & credentials — NEVER commit these
+.env
+.env.*
+credentials.json
+service_account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+.streamlit/secrets.toml
+streamlit/.streamlit/secrets.toml
+
+# E2E test artifacts
+screenshots/

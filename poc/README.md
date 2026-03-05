@@ -100,7 +100,7 @@ export POC_CONNECTION=my_account
 ./poc/deploy_poc.sh
 ```
 
-The script creates the database, tables, stages sample documents, runs batch extraction, creates views, sets up automation, and deploys the Streamlit dashboard. See [File Structure](#file-structure) for what gets created.
+The script creates the database, tables, stages sample documents (from `sample_documents/`), runs batch extraction, creates views, sets up automation, and deploys the Streamlit dashboard. The 5 included sample invoices let you validate the full pipeline immediately.
 
 If you prefer to understand each step, follow the manual [Step-by-Step Guide](#step-by-step-guide) below.
 
@@ -481,12 +481,21 @@ ALTER TASK EXTRACT_NEW_DOCUMENTS_TASK SUSPEND;
 ```
 ai_extract_poc/
 ├── README.md                              # This guide
+├── LICENSE                                # Apache 2.0
+├── .gitignore                             # Ignores secrets, caches, venvs
 ├── deploy_poc.sh                          # Automated deploy script (Quick Start)
 ├── teardown_poc.sql                       # Drop all POC objects (DB, warehouse, compute pool)
+├── generate_sample_docs.py                # Generate 5 sample invoices (requires reportlab)
 ├── conftest.py                            # Root pytest config: Snowflake connection fixture,
 │                                          #   Streamlit server lifecycle, env var overrides
 ├── pyproject.toml                         # Python dependencies (app + dev/test)
 ├── uv.lock                                # Lockfile for reproducible builds (committed)
+├── sample_documents/                      # 5 pre-generated sample invoices (committed)
+│   ├── sample_invoice_01.pdf
+│   ├── sample_invoice_02.pdf
+│   ├── sample_invoice_03.pdf
+│   ├── sample_invoice_04.pdf
+│   └── sample_invoice_05.pdf
 ├── sql/
 │   ├── 01_setup.sql                       # Database, schema, warehouse, stage
 │   ├── 02_tables.sql                      # Document tracking + extraction tables
