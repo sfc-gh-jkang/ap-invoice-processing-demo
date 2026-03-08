@@ -319,7 +319,7 @@ class TestFieldDescriptions:
 # ===========================================================================
 # 5. SQL integration: confidence scores in Snowflake data
 # ===========================================================================
-CONNECTION_NAME = os.environ.get("POC_CONNECTION", "aws_spcs")
+CONNECTION_NAME = os.environ.get("POC_CONNECTION", "default")
 POC_DB = os.environ.get("POC_DB", "AI_EXTRACT_POC")
 POC_SCHEMA = os.environ.get("POC_SCHEMA", "DOCUMENTS")
 POC_WH = os.environ.get("POC_WH", "AI_EXTRACT_WH")

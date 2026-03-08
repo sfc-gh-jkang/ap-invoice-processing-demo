@@ -119,7 +119,7 @@ upload-streamlit: ## Re-upload Streamlit files to STREAMLIT_STAGE (after code ch
 # Cross-cloud testing
 # ---------------------------------------------------------------------------
 
-CLOUDS ?= aws_spcs azure_spcs gcp_spcs
+CLOUDS ?= default
 
 test-cross-cloud: ## Run non-E2E tests against all 3 clouds (AWS, Azure, GCP)
   @for cloud in $(CLOUDS); do \

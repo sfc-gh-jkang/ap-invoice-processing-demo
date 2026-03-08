@@ -152,7 +152,7 @@ AP_CONNECTION=my_connection ./deploy.sh
 | `AP_SCHEMA` | `AP` | Target schema name |
 | `AP_WAREHOUSE` | `AP_DEMO_WH` | Warehouse name |
 | `AP_COMPUTE_POOL` | `AP_DEMO_POOL` | Compute pool name |
-| `AP_CONNECTION` | `aws_spcs` | Snowflake CLI connection name |
+| `AP_CONNECTION` | `default` | Snowflake CLI connection name |
 
 ### Teardown
 

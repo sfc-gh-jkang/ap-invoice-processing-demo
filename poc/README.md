@@ -1,6 +1,7 @@
 # AI_EXTRACT POC Kit
 
-[![Tests](https://github.com/sfc-gh-jkang/ap-invoice-processing-demo/actions/workflows/test.yml/badge.svg)](https://github.com/sfc-gh-jkang/ap-invoice-processing-demo/actions/workflows/test.yml)
+<!-- CI badge: update the URL below to match your repository -->
+<!-- [![Tests](https://github.com/YOUR-ORG/YOUR-REPO/actions/workflows/test.yml/badge.svg)](https://github.com/YOUR-ORG/YOUR-REPO/actions/workflows/test.yml) -->
 
 Extract structured data from your own PDFs, images, and documents using **Snowflake Cortex AI_EXTRACT** — entirely within your Snowflake account. No external services, no API keys, no data leaves Snowflake.
 
@@ -49,6 +50,7 @@ This kit walks you through a complete proof-of-concept:
 | **Account Region** | Must be a [supported region](https://docs.snowflake.com/en/user-guide/snowflake-cortex/ai-extract#regional-availability), or enable cross-region inference (see below) |
 | **Role** | ACCOUNTADMIN for initial setup (role creation, Cortex grant, EAI); `AI_EXTRACT_APP` role for all other operations |
 | **Cortex Access** | SNOWFLAKE.CORTEX_USER database role granted to `AI_EXTRACT_APP` |
+| **Container Runtime** | Required for Streamlit deployment. Account must have `BIND SERVICE ENDPOINT ON ACCOUNT` granted to the deploying role. |
 
 **Supported AI_EXTRACT Regions:**
 
@@ -63,6 +65,8 @@ ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = 'ANY_REGION';
 ```
 
 > **Note:** `01_setup.sql` (and `deploy_poc.sh`) now run this command automatically, so you don't need to do it manually unless running scripts individually.
+
+> **Cost note:** Cross-region inference routes requests to a supported region if your account's home region doesn't support AI_EXTRACT. This may add latency and incur cross-region data transfer costs. For production workloads, consider deploying in a natively supported region.
 
 ### Supported File Types
 
@@ -998,7 +1002,7 @@ uv run playwright install chromium
 
 The root-level `conftest.py` provides shared test infrastructure:
 
-- **Snowflake connection fixture** (`sf_conn`, `sf_cursor`) — connects using the `POC_CONNECTION` env var (default `aws_spcs`), executes `USE ROLE` with `POC_ROLE` (default `AI_EXTRACT_APP`), and sets the active database, schema, and warehouse
+- **Snowflake connection fixture** (`sf_conn`, `sf_cursor`) — connects using the `POC_CONNECTION` env var (default `default`), executes `USE ROLE` with `POC_ROLE` (default `AI_EXTRACT_APP`), and sets the active database, schema, and warehouse
 - **Connection factory fixture** (`sf_conn_factory`) — returns a callable that creates fresh Snowflake connections, used by load and concurrency tests for true multi-connection parallelism
 - **Streamlit server lifecycle** — automatically starts a local Streamlit server on port 8504 when E2E tests are selected, kills stale port holders, and waits for the server to be ready
 - **Environment variable configuration** — all names (database, schema, warehouse, role, connection) are configurable via `POC_DB`, `POC_SCHEMA`, `POC_WH`, `POC_ROLE`, and `POC_CONNECTION` env vars
@@ -1186,18 +1190,13 @@ To run the full test suite against a non-default account, set the `POC_CONNECTIO
 ```bash
 cd poc
 
-# Azure
-POC_CONNECTION=azure_spcs POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
-  POC_WH=AI_EXTRACT_WH POC_ROLE=AI_EXTRACT_APP \
-  uv run pytest tests/ --ignore=tests/test_e2e -v
-
-# GCP
-POC_CONNECTION=gcp_spcs POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
+# Run against a specific connection
+POC_CONNECTION=my_other_conn POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
   POC_WH=AI_EXTRACT_WH POC_ROLE=AI_EXTRACT_APP \
   uv run pytest tests/ --ignore=tests/test_e2e -v
 
 # E2E tests (starts a local Streamlit server pointed at the target account)
-POC_CONNECTION=azure_spcs POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
+POC_CONNECTION=my_other_conn POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
   POC_WH=AI_EXTRACT_WH POC_ROLE=AI_EXTRACT_APP \
   uv run pytest tests/test_e2e/ -v
 ```
@@ -1205,8 +1204,8 @@ POC_CONNECTION=azure_spcs POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
 **Shortcut — run all three clouds in one command:**
 
 ```bash
-make test-cross-cloud                    # defaults: aws_spcs, azure_spcs, gcp_spcs
-make test-cross-cloud CLOUDS="aws_spcs azure_spcs"  # subset of clouds
+make test-cross-cloud                    # uses CLOUDS variable (default: "default")
+make test-cross-cloud CLOUDS="conn_a conn_b conn_c"  # test multiple connections
 ```
 
 This iterates each connection, runs all non-E2E tests, and prints a per-cloud PASSED / FAILED summary.
@@ -1482,7 +1481,49 @@ After a successful POC:
 3. **Scale up** — Stage thousands of documents and run batch extraction
 4. **Automate** — Enable the Stream + Task pipeline from `06_automate.sql`
 5. **Integrate** — Connect extraction output to your ERP, AP system, or data warehouse via Snowflake data sharing, Snowpipe, or direct table access
-6. **Explore the reference demo** — A full-featured invoice processing app with generated test data, additional analytics, and E2E tests: [github.com/sfc-gh-jkang/ap-invoice-processing-demo](https://github.com/sfc-gh-jkang/ap-invoice-processing-demo)
+6. **Explore the reference demo** — A full-featured invoice processing app with generated test data, additional analytics, and E2E tests (see the root `README.md` in this repository)
+
+---
+
+## Customer Handoff Checklist
+
+Use this checklist when transferring the POC kit to a customer or deploying in a new account.
+
+### Before Sharing
+
+- [ ] **Update CI badge** — Uncomment and update the badge URL at the top of this README to point to the customer's repository
+- [ ] **Update `snowflake.yml`** — Change `query_warehouse` and `compute_pool` if the customer uses different names (only needed if deploying via `snow streamlit deploy`)
+- [ ] **Verify connection config** — Ensure the customer has a `default` connection in `~/.snowflake/connections.toml`, or instruct them to set `POC_CONNECTION` to their connection name
+
+### Customer Account Setup
+
+1. **Verify prerequisites** — Standard Edition or higher, supported region (or cross-region enabled), ACCOUNTADMIN access for initial setup
+2. **Run `deploy_poc.sh`** — This creates all objects (database, schema, warehouse, role, stage, tables, views, Streamlit app) in one command
+3. **Upload sample documents** — Stage 5-20 customer documents in `DOCUMENT_STAGE`
+4. **Run single-file extraction** — Use `03_test_single_file.sql` to validate prompts against the customer's document format
+5. **Tune prompts** — Edit the `EXTRACTION_PROMPT` and `TABLE_PROMPT` in `DOC_TYPE_CONFIG` to match the customer's document layout
+6. **Run batch extraction** — Execute `04_batch_extract.sql` to process all staged documents
+7. **Review results** — Open the Streamlit dashboard and review extracted data for accuracy
+
+### Customization Points
+
+| What | Where | How |
+|---|---|---|
+| Object names (DB, schema, WH) | `deploy_poc.sh` env vars | `POC_DB=MY_DB POC_WH=MY_WH ./deploy_poc.sh` |
+| Document types | `sql/09_document_types.sql` | Add/modify rows in `DOC_TYPE_CONFIG` |
+| Extraction prompts | `DOC_TYPE_CONFIG.EXTRACTION_PROMPT` | JSON object mapping field names to extraction instructions |
+| Validation rules | `DOC_TYPE_CONFIG.VALIDATION_RULES` | JSON object with field-level validation (type, required, range) |
+| Streamlit branding | `streamlit/streamlit_app.py` | Edit titles, descriptions, and layout |
+
+### Teardown
+
+To remove all POC objects from the customer account:
+
+```bash
+./teardown_poc.sh
+```
+
+This drops the database, warehouse, compute pool, and role. The `PYPI_ACCESS_INTEGRATION` is intentionally left in place as other apps may use it.
 
 ---
 

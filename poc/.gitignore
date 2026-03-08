@@ -37,3 +37,7 @@ streamlit/.streamlit/secrets.toml
 
 # E2E test artifacts
 screenshots/
+
+# Benchmark outputs (developer-specific)
+benchmark_results.json
+benchmark_tmp/

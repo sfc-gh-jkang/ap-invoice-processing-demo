@@ -32,12 +32,12 @@ uv run pytest tests/test_e2e/ -v
 # Full suite:
 uv run pytest tests/ -v
 
-# Cross-cloud (Azure or GCP):
-POC_CONNECTION=azure_spcs POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
+# Cross-cloud (override connection):
+POC_CONNECTION=my_other_conn POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
   POC_WH=AI_EXTRACT_WH POC_ROLE=AI_EXTRACT_APP \
   uv run pytest tests/ --ignore=tests/test_e2e -v
 
-POC_CONNECTION=gcp_spcs POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
+POC_CONNECTION=my_other_conn POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
   POC_WH=AI_EXTRACT_WH POC_ROLE=AI_EXTRACT_APP \
   uv run pytest tests/test_e2e/ -v
 

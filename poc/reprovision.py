@@ -5,9 +5,9 @@ Usage:
     python3 reprovision.py <connection_name>
 
 Example:
-    python3 reprovision.py aws_spcs
-    python3 reprovision.py azure_spcs
-    python3 reprovision.py gcp_spcs
+    python3 reprovision.py default
+    python3 reprovision.py my_azure_conn
+    python3 reprovision.py my_gcp_conn
 
 This script:
   1. Tears down all existing POC objects (database, warehouse, role)

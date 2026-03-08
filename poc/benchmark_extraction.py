@@ -6,10 +6,10 @@ Produces a JSON report and prints a summary table.
 
 Usage:
     # Run against current data (no new docs generated)
-    POC_CONNECTION=aws_spcs python benchmark_extraction.py
+    POC_CONNECTION=default python benchmark_extraction.py
 
     # Generate N additional invoices first, then benchmark
-    POC_CONNECTION=aws_spcs python benchmark_extraction.py --generate 370
+    POC_CONNECTION=default python benchmark_extraction.py --generate 370
 
 Environment variables:
     POC_CONNECTION  Snowflake connection name (required)
@@ -31,7 +31,7 @@ import snowflake.connector
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-CONNECTION = os.environ.get("POC_CONNECTION", "aws_spcs")
+CONNECTION = os.environ.get("POC_CONNECTION", "default")
 DB = os.environ.get("POC_DB", "AI_EXTRACT_POC")
 SCHEMA = os.environ.get("POC_SCHEMA", "DOCUMENTS")
 WH = os.environ.get("POC_WH", "AI_EXTRACT_WH")

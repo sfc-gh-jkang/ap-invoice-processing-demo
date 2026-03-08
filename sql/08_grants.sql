@@ -4,7 +4,7 @@
 -- This script is idempotent and can be re-run whenever new objects are created.
 --
 -- Usage (demo account):
---   snow sql -c aws_spcs -f sql/08_grants.sql
+--   snow sql -c default -f sql/08_grants.sql
 --
 -- Usage (Snowhouse / shared environments):
 --   snow sql -c snowhouse -f sql/08_grants.sql

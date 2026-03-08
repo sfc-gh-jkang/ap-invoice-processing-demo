@@ -24,27 +24,33 @@ st.divider()
 # --- Live Pipeline Stats ---
 session = get_session()
 
-status = session.sql(
-    f"SELECT * FROM {DB}.V_EXTRACTION_STATUS"
-).to_pandas()
+try:
+    status = session.sql(
+        f"SELECT * FROM {DB}.V_EXTRACTION_STATUS"
+    ).to_pandas()
 
-if len(status) > 0:
-    s = status.iloc[0]
-    st.header("Pipeline Status")
+    if len(status) > 0:
+        s = status.iloc[0]
+        st.header("Pipeline Status")
 
-    col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4 = st.columns(4)
 
-    with col1:
-        st.metric("Total Files Staged", f"{int(s['TOTAL_FILES']):,}")
-    with col2:
-        st.metric("Successfully Extracted", f"{int(s['EXTRACTED_FILES']):,}")
-    with col3:
-        st.metric("Pending", f"{int(s['PENDING_FILES']):,}")
-    with col4:
-        st.metric("Failed", f"{int(s['FAILED_FILES']):,}")
+        with col1:
+            st.metric("Total Files Staged", f"{int(s['TOTAL_FILES']):,}")
+        with col2:
+            st.metric("Successfully Extracted", f"{int(s['EXTRACTED_FILES']):,}")
+        with col3:
+            st.metric("Pending", f"{int(s['PENDING_FILES']):,}")
+        with col4:
+            st.metric("Failed", f"{int(s['FAILED_FILES']):,}")
 
-    if s["LAST_EXTRACTION"]:
-        st.caption(f"Last extraction: {s['LAST_EXTRACTION']}")
+        if s["LAST_EXTRACTION"]:
+            st.caption(f"Last extraction: {s['LAST_EXTRACTION']}")
+except Exception:
+    st.warning(
+        "Could not load pipeline status. "
+        "Have you run the setup scripts (`01_setup.sql` through `05_views.sql`)?"
+    )
 
 st.divider()
 
@@ -101,22 +107,25 @@ st.graphviz_chart(
 st.divider()
 
 # --- Quick summary from extracted data ---
-summary = session.sql(
-    f"""
-    SELECT
-        (SELECT COUNT(*) FROM {DB}.EXTRACTED_FIELDS) AS documents,
-        (SELECT COUNT(*) FROM {DB}.EXTRACTED_TABLE_DATA) AS line_items,
-        (SELECT COUNT(DISTINCT field_1) FROM {DB}.EXTRACTED_FIELDS WHERE field_1 IS NOT NULL) AS unique_senders
-    """
-).to_pandas()
+try:
+    summary = session.sql(
+        f"""
+        SELECT
+            (SELECT COUNT(*) FROM {DB}.EXTRACTED_FIELDS) AS documents,
+            (SELECT COUNT(*) FROM {DB}.EXTRACTED_TABLE_DATA) AS line_items,
+            (SELECT COUNT(DISTINCT field_1) FROM {DB}.EXTRACTED_FIELDS WHERE field_1 IS NOT NULL) AS unique_senders
+        """
+    ).to_pandas()
 
-if len(summary) > 0:
-    r = summary.iloc[0]
-    st.header("Extraction Summary")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Documents Extracted", f"{int(r['DOCUMENTS']):,}")
-    m2.metric("Line Items Parsed", f"{int(r['LINE_ITEMS']):,}")
-    m3.metric("Unique Senders", f"{int(r['UNIQUE_SENDERS']):,}")
+    if len(summary) > 0:
+        r = summary.iloc[0]
+        st.header("Extraction Summary")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Documents Extracted", f"{int(r['DOCUMENTS']):,}")
+        m2.metric("Line Items Parsed", f"{int(r['LINE_ITEMS']):,}")
+        m3.metric("Unique Senders", f"{int(r['UNIQUE_SENDERS']):,}")
+except Exception:
+    pass  # Pipeline status warning above is sufficient
 
 # --- Sidebar navigation guide ---
 with st.sidebar:

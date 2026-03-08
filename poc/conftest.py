@@ -1,6 +1,6 @@
 """Root conftest for POC tests.
 
-Provides a shared Snowflake connection fixture using the aws_spcs connection,
+Provides a shared Snowflake connection fixture using the configured connection,
 and manages Streamlit server lifecycle for E2E tests.
 """
 
