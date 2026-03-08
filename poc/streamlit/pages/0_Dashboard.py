@@ -3,29 +3,43 @@ Page 0: Dashboard — KPI cards, recent documents, extraction metrics.
 """
 
 import streamlit as st
-from config import DB
+from config import DB, get_session, get_doc_type_labels, get_doc_types
 
 st.title("Document Processing Dashboard")
 st.caption("Powered by Snowflake Cortex AI_EXTRACT")
 
-conn = st.connection("snowflake")
+session = get_session()
+
+# --- Document Type Filter ---
+doc_types = get_doc_types(session)
+selected_type = st.selectbox("Document Type", ["ALL"] + doc_types, index=0)
+
+labels = get_doc_type_labels(session, selected_type if selected_type != "ALL" else "INVOICE")
+
+type_clause = ""
+type_params = []
+if selected_type != "ALL":
+    type_clause = "WHERE rd.doc_type = ?"
+    type_params = [selected_type]
 
 
 # --- KPI Cards ---
-kpis = conn.query(
+kpis = session.sql(
     f"""
     SELECT
         COUNT(*)                                                     AS total_documents,
-        SUM(field_10)                                                AS total_amount,
-        COUNT(DISTINCT field_1)                                      AS unique_senders,
-        COUNT(CASE WHEN field_5 IS NOT NULL
-                    AND field_5 < CURRENT_DATE() THEN 1 END)        AS overdue_count,
-        SUM(CASE WHEN field_5 IS NOT NULL
-                  AND field_5 < CURRENT_DATE() THEN field_10 ELSE 0 END) AS overdue_amount
-    FROM {DB}.EXTRACTED_FIELDS
+        SUM(ef.field_10)                                             AS total_amount,
+        COUNT(DISTINCT ef.field_1)                                   AS unique_senders,
+        COUNT(CASE WHEN ef.field_5 IS NOT NULL
+                    AND ef.field_5 < CURRENT_DATE() THEN 1 END)     AS overdue_count,
+        SUM(CASE WHEN ef.field_5 IS NOT NULL
+                  AND ef.field_5 < CURRENT_DATE() THEN ef.field_10 ELSE 0 END) AS overdue_amount
+    FROM {DB}.EXTRACTED_FIELDS ef
+        JOIN {DB}.RAW_DOCUMENTS rd ON ef.file_name = rd.file_name
+    {type_clause}
     """,
-    ttl=30,
-)
+    params=type_params,
+).to_pandas()
 
 if len(kpis) > 0:
     k = kpis.iloc[0]
@@ -37,10 +51,10 @@ if len(kpis) > 0:
 
     with col2:
         total = k["TOTAL_AMOUNT"] or 0
-        st.metric("Total Amount", f"${total:,.0f}")
+        st.metric(labels.get("amount_label", "Total Amount"), f"${total:,.0f}")
 
     with col3:
-        st.metric("Unique Senders", f"{int(k['UNIQUE_SENDERS']):,}")
+        st.metric(f"Unique {labels.get('sender_label', 'Senders')}", f"{int(k['UNIQUE_SENDERS']):,}")
 
     with col4:
         overdue = k["OVERDUE_AMOUNT"] or 0
@@ -54,7 +68,7 @@ if len(kpis) > 0:
 st.divider()
 
 # --- Extraction Pipeline Status ---
-status = conn.query(f"SELECT * FROM {DB}.V_EXTRACTION_STATUS", ttl=10)
+status = session.sql(f"SELECT * FROM {DB}.V_EXTRACTION_STATUS").to_pandas()
 
 if len(status) > 0:
     s = status.iloc[0]
@@ -74,32 +88,34 @@ st.divider()
 # --- Recent Documents ---
 st.subheader("Recently Extracted Documents")
 
-recent = conn.query(
+recent = session.sql(
     f"""
     SELECT
-        field_2       AS document_number,
-        field_1       AS sender,
-        field_4       AS document_date,
-        field_5       AS due_date,
-        field_10      AS total_amount,
-        status,
-        extracted_at
-    FROM {DB}.EXTRACTED_FIELDS
-    ORDER BY extracted_at DESC NULLS LAST
+        ef.field_2       AS document_number,
+        ef.field_1       AS sender,
+        ef.field_4       AS document_date,
+        ef.field_5       AS due_date,
+        ef.field_10      AS total_amount,
+        ef.status,
+        ef.extracted_at
+    FROM {DB}.EXTRACTED_FIELDS ef
+        JOIN {DB}.RAW_DOCUMENTS rd ON ef.file_name = rd.file_name
+    {type_clause}
+    ORDER BY ef.extracted_at DESC NULLS LAST
     LIMIT 15
     """,
-    ttl=30,
-)
+    params=type_params,
+).to_pandas()
 
 if len(recent) > 0:
     st.dataframe(
         recent,
         column_config={
-            "DOCUMENT_NUMBER": "Document #",
-            "SENDER": "Sender",
-            "DOCUMENT_DATE": st.column_config.DateColumn("Date"),
+            "DOCUMENT_NUMBER": labels.get("reference_label", "Document #"),
+            "SENDER": labels.get("sender_label", "Sender"),
+            "DOCUMENT_DATE": st.column_config.DateColumn(labels.get("date_label", "Date")),
             "DUE_DATE": st.column_config.DateColumn("Due Date"),
-            "TOTAL_AMOUNT": st.column_config.NumberColumn("Amount", format="$%.2f"),
+            "TOTAL_AMOUNT": st.column_config.NumberColumn(labels.get("amount_label", "Amount"), format="$%.2f"),
             "STATUS": "Status",
             "EXTRACTED_AT": "Extracted At",
         },

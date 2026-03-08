@@ -1,0 +1,20 @@
+definition_version: "2"
+entities:
+  ai_extract_dashboard:
+    type: streamlit
+    identifier:
+      name: AI_EXTRACT_DASHBOARD
+    title: "AI_EXTRACT Document Processing"
+    comment: "Document extraction dashboard powered by Cortex AI_EXTRACT"
+    query_warehouse: AI_EXTRACT_WH
+    main_file: streamlit_app.py
+    pages_dir: pages/
+    additional_source_files:
+      - config.py
+      - environment.yml
+    stage: STREAMLIT_STAGE
+    runtime:
+      name: SYSTEM$ST_CONTAINER_RUNTIME_PY3_11
+      compute_pool: AI_EXTRACT_POC_POOL
+      external_access_integrations:
+        - PYPI_ACCESS_INTEGRATION

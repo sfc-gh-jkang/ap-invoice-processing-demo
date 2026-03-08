@@ -9,6 +9,7 @@
 -- This script does NOT write to any tables — it's read-only exploration.
 -- =============================================================================
 
+USE ROLE AI_EXTRACT_APP;
 USE DATABASE AI_EXTRACT_POC;
 USE SCHEMA DOCUMENTS;
 USE WAREHOUSE AI_EXTRACT_WH;

@@ -232,14 +232,19 @@ class TestExtractionFieldTypes:
         )
 
     def test_no_null_dates_from_parse_failure(self, sf_cursor):
-        """field_4 (document_date) should not be NULL due to TRY_TO_DATE failure."""
+        """field_4 (document_date) should not be NULL for invoices.
+
+        Non-invoice doc types map different data to field_4 (e.g., utility
+        bills map service_address, which becomes NULL via TRY_TO_DATE).
+        """
         sf_cursor.execute(
             "SELECT COUNT(*) FROM EXTRACTED_FIELDS "
-            "WHERE field_4 IS NULL AND status = 'EXTRACTED'"
+            "WHERE field_4 IS NULL AND status = 'EXTRACTED' "
+            "  AND file_name LIKE 'sample_invoice%'"
         )
         null_dates = sf_cursor.fetchone()[0]
         assert null_dates == 0, (
-            f"{null_dates} extracted records have NULL document_date — "
+            f"{null_dates} invoice records have NULL document_date — "
             f"TRY_TO_DATE may be failing to parse AI_EXTRACT output. "
             f"Check that the prompt says 'Return in YYYY-MM-DD format.'"
         )
@@ -300,4 +305,100 @@ class TestTeardownCompleteness:
         assert len(rows) >= 1, (
             "Teardown references AI_EXTRACT_POC.DOCUMENTS.EXTRACT_NEW_DOCUMENTS_TASK "
             "but task not found at that path."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stream + Task integration
+# ---------------------------------------------------------------------------
+class TestStreamTaskIntegration:
+    """Verify the stream and task work together for automated extraction."""
+
+    def test_stream_exists(self, sf_cursor):
+        """The RAW_DOCUMENTS_STREAM should exist on RAW_DOCUMENTS."""
+        sf_cursor.execute(
+            "SHOW STREAMS LIKE 'RAW_DOCUMENTS_STREAM' IN SCHEMA AI_EXTRACT_POC.DOCUMENTS"
+        )
+        rows = sf_cursor.fetchall()
+        assert len(rows) >= 1, "RAW_DOCUMENTS_STREAM not found"
+
+    def test_stream_is_on_raw_documents(self, sf_cursor):
+        """Stream should be defined on the RAW_DOCUMENTS table."""
+        sf_cursor.execute(
+            "SHOW STREAMS LIKE 'RAW_DOCUMENTS_STREAM' IN SCHEMA AI_EXTRACT_POC.DOCUMENTS"
+        )
+        rows = sf_cursor.fetchall()
+        if len(rows) == 0:
+            pytest.skip("Stream not found")
+        # SHOW STREAMS columns vary; find the "table_name" column
+        col_names = [desc[0] for desc in sf_cursor.description]
+        # Look for a column with the source table info
+        row_dict = dict(zip(col_names, rows[0]))
+        table_name = row_dict.get("table_name", row_dict.get("TABLE_NAME", ""))
+        assert "RAW_DOCUMENTS" in str(table_name).upper(), (
+            f"Stream should be on RAW_DOCUMENTS, found: {table_name}"
+        )
+
+    def test_task_exists_and_references_proc(self, sf_cursor):
+        """EXTRACT_NEW_DOCUMENTS_TASK should exist and call SP_EXTRACT_NEW_DOCUMENTS."""
+        sf_cursor.execute(
+            "SHOW TASKS LIKE 'EXTRACT_NEW_DOCUMENTS_TASK' IN SCHEMA AI_EXTRACT_POC.DOCUMENTS"
+        )
+        rows = sf_cursor.fetchall()
+        assert len(rows) >= 1, "Task not found"
+        col_names = [desc[0] for desc in sf_cursor.description]
+        row_dict = dict(zip(col_names, rows[0]))
+        definition = row_dict.get("definition", row_dict.get("DEFINITION", ""))
+        assert "SP_EXTRACT_NEW_DOCUMENTS" in str(definition).upper(), (
+            f"Task should call SP_EXTRACT_NEW_DOCUMENTS, got: {definition}"
+        )
+
+    def test_stream_is_empty_after_full_extraction(self, sf_cursor):
+        """After all invoice documents have been extracted, the stream should have
+        no pending invoice rows (the proc consumed them).
+
+        Utility bills are inserted via a different path (Python SP, not the
+        stream-based SQL SP) so they may appear as unconsumed stream rows.
+        """
+        sf_cursor.execute(
+            "SELECT COUNT(*) FROM AI_EXTRACT_POC.DOCUMENTS.RAW_DOCUMENTS_STREAM "
+            "WHERE file_name LIKE 'sample_invoice%'"
+        )
+        pending = sf_cursor.fetchone()[0]
+        assert pending == 0, (
+            f"Stream has {pending} unconsumed invoice rows — proc may not have consumed all"
+        )
+
+    def test_proc_is_idempotent_with_empty_stream(self, sf_cursor):
+        """Calling SP_EXTRACT_NEW_DOCUMENTS when stream is empty should
+        process 0 documents and not create duplicates."""
+        sf_cursor.execute("SELECT COUNT(*) FROM EXTRACTED_FIELDS")
+        before = sf_cursor.fetchone()[0]
+
+        sf_cursor.execute("CALL SP_EXTRACT_NEW_DOCUMENTS()")
+        result = sf_cursor.fetchone()[0]
+        assert "0" in str(result), (
+            f"Expected 'Processed 0 new document(s)' with empty stream, got: {result}"
+        )
+
+        sf_cursor.execute("SELECT COUNT(*) FROM EXTRACTED_FIELDS")
+        after = sf_cursor.fetchone()[0]
+        assert after == before, (
+            f"Proc created duplicates with empty stream: {before} -> {after}"
+        )
+
+    def test_task_has_stream_condition(self, sf_cursor):
+        """Task should have a WHEN condition checking stream_has_data
+        to avoid unnecessary runs."""
+        sf_cursor.execute(
+            "SHOW TASKS LIKE 'EXTRACT_NEW_DOCUMENTS_TASK' IN SCHEMA AI_EXTRACT_POC.DOCUMENTS"
+        )
+        rows = sf_cursor.fetchall()
+        if len(rows) == 0:
+            pytest.skip("Task not found")
+        col_names = [desc[0] for desc in sf_cursor.description]
+        row_dict = dict(zip(col_names, rows[0]))
+        condition = str(row_dict.get("condition", row_dict.get("CONDITION", "")))
+        assert "SYSTEM$STREAM_HAS_DATA" in condition.upper(), (
+            f"Task should check SYSTEM$STREAM_HAS_DATA, got condition: {condition}"
         )

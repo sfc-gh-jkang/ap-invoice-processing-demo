@@ -47,15 +47,21 @@ class TestDocumentViewerSmoke:
 class TestDocumentViewerFilters:
     """Verify filter controls work."""
 
-    def test_sender_filter_exists(self, page, app_url):
+    def test_doc_type_filter_exists(self, page, app_url):
+        """Document Viewer should have a Document Type selectbox."""
         _navigate(page, app_url)
         selectboxes = page.locator('[data-testid="stSelectbox"]')
         assert selectboxes.count() >= 1, "No filter selectboxes found"
 
-    def test_status_filter_exists(self, page, app_url):
+    def test_sender_filter_exists(self, page, app_url):
         _navigate(page, app_url)
         selectboxes = page.locator('[data-testid="stSelectbox"]')
         assert selectboxes.count() >= 2, "Expected at least 2 filter selectboxes"
+
+    def test_status_filter_exists(self, page, app_url):
+        _navigate(page, app_url)
+        selectboxes = page.locator('[data-testid="stSelectbox"]')
+        assert selectboxes.count() >= 3, "Expected at least 3 filter selectboxes (doc type + sender + status)"
 
     def test_document_count_label(self, page, app_url):
         _navigate(page, app_url)
@@ -85,9 +91,9 @@ class TestDocumentViewerDetail:
         _navigate(page, app_url)
         # There should be a selectbox for choosing a specific document
         selectboxes = page.locator('[data-testid="stSelectbox"]')
-        # At least 3: sender filter, status filter, document selector
-        assert selectboxes.count() >= 3, (
-            f"Expected >=3 selectboxes (2 filters + doc selector), got {selectboxes.count()}"
+        # At least 4: doc type filter, sender filter, status filter, document selector
+        assert selectboxes.count() >= 4, (
+            f"Expected >=4 selectboxes (3 filters + doc selector), got {selectboxes.count()}"
         )
 
     def test_extracted_fields_visible(self, page, app_url):

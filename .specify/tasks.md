@@ -2,7 +2,7 @@
 
 **Input**: Design documents from `.specify/`
 **Prerequisites**: plan.md, spec.md
-**Updated**: 2026-03-03
+**Updated**: 2026-03-07
 
 ## Phase 1: Setup
 
@@ -90,3 +90,44 @@
 - [x] T049 146 Playwright E2E tests pass
 - [x] T050 Both demo and Snowhouse apps work end-to-end
 - [x] T051 No secrets in git history
+
+## Phase 12: AI_EXTRACT POC Kit
+
+- [x] T052 Create `poc/` standalone POC directory with SQL scripts, Streamlit app, sample docs
+- [x] T053 Create generic extraction pipeline (field_1..field_10, col_1..col_5) for any document type
+- [x] T054 Create `poc/deploy_poc.sh` — automated deploy script with env var configuration
+- [x] T055 Create `poc/teardown_poc.sql` — drop all POC objects
+- [x] T056 Create review workflow: `INVOICE_REVIEW` table (append-only audit trail) + `V_INVOICE_SUMMARY` view
+- [x] T057 Create inline `st.data_editor` review page with writeback to `INVOICE_REVIEW`
+- [x] T058 Create comprehensive non-E2E test suite (16 files, ~350 tests): SQL integration, data validation, extraction pipeline, writeback, review helpers, RBAC, performance, load stress, concurrency, edge cases, data drift, teardown idempotency, deployment readiness, SQL parity, config
+- [x] T059 Create Playwright E2E test suite (5 files, ~72 tests): landing, dashboard, document viewer, analytics, review
+
+## Phase 13: RBAC & Security Hardening
+
+- [x] T060 Create `AI_EXTRACT_APP` role with least-privilege grants (USAGE, SELECT, INSERT, READ, FUTURE)
+- [x] T061 Grant `SNOWFLAKE.CORTEX_USER` database role to `AI_EXTRACT_APP`
+- [x] T062 Replace ACCOUNTADMIN usage in `secrets.toml`, `conftest.py`, and deploy scripts
+- [x] T063 Add `POC_ROLE` env var to `conftest.py` for cross-role testing
+- [x] T064 Parameterize all user-facing SQL queries (`params=[]`) — eliminate SQL injection via f-strings
+- [x] T065 Create `test_rbac_permissions.py` — 20 tests for role-based access control
+
+## Phase 14: Multi-Document-Type Support
+
+- [x] T066 Create `DOCUMENT_TYPE_CONFIG` table with per-type extraction prompts and UI labels (VARIANT JSON)
+- [x] T067 Add `doc_type` column to `RAW_DOCUMENTS` (DEFAULT 'INVOICE')
+- [x] T068 Seed 3 built-in types: INVOICE, CONTRACT, RECEIPT
+- [x] T069 Wire document type filter dropdown into all 4 Streamlit pages (Dashboard, Viewer, Analytics, Review)
+- [x] T070 Update `config.py` with `get_doc_type_labels()` and `get_doc_types()` with fallback defaults
+- [x] T071 Update `V_DOCUMENT_LEDGER` and `V_INVOICE_SUMMARY` views to include `doc_type` via JOIN
+
+## Phase 15: Cross-Cloud Validation
+
+- [x] T072 Provision Azure account: tables, views, RBAC role, grants, CORTEX_USER, stage uploads
+- [x] T073 Provision GCP account: tables, views, RBAC role, grants, CORTEX_USER, stage uploads
+- [x] T074 Run full non-E2E test suite against Azure (350 passed, 3 skipped, 0 failed)
+- [x] T075 Run full non-E2E test suite against GCP (350 passed, 3 skipped, 0 failed)
+- [x] T076 Run full E2E test suite against Azure (71 passed, 1 skipped, 0 failed)
+- [x] T077 Run full E2E test suite against GCP (71 passed, 1 skipped, 0 failed)
+- [x] T078 Fix cross-cloud issues: missing DOC_TYPE column, missing INVOICE_REVIEW/DOCUMENT_TYPE_CONFIG tables, missing V_INVOICE_SUMMARY view, missing 3_Review.py on STREAMLIT_STAGE
+- [x] T079 Document cross-cloud testing commands and results in poc/README.md, CLAUDE.md, README.md, DESIGN.md
+- [x] T080 Update all documentation with RBAC, multi-doc-type, and cross-cloud learnings

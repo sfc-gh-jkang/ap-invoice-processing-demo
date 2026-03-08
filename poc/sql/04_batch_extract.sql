@@ -12,6 +12,7 @@
 -- into the AI_EXTRACT calls below. The prompts must match.
 -- =============================================================================
 
+USE ROLE AI_EXTRACT_APP;
 USE DATABASE AI_EXTRACT_POC;
 USE SCHEMA DOCUMENTS;
 USE WAREHOUSE AI_EXTRACT_WH;

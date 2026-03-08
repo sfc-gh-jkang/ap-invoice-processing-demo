@@ -4,32 +4,49 @@ Page 2: Analytics — Spend/volume by sender, monthly trends, top line items.
 
 import streamlit as st
 import plotly.express as px
-from config import DB
+from config import DB, get_session, get_doc_type_labels, get_doc_types
 
 st.set_page_config(page_title="Analytics", page_icon="📊", layout="wide")
 
-conn = st.connection("snowflake")
+session = get_session()
 
 st.title("Document Analytics")
 st.caption("Insights from your extracted document data")
 
+# --- Document Type Filter ---
+doc_types = get_doc_types(session)
+selected_type = st.selectbox("Document Type", ["ALL"] + doc_types, index=0)
+
+labels = get_doc_type_labels(session, selected_type if selected_type != "ALL" else "INVOICE")
+
+type_and_clause = ""
+type_where_clause = ""
+type_params = []
+if selected_type != "ALL":
+    type_and_clause = "AND rd.doc_type = ?"
+    type_where_clause = "WHERE rd.doc_type = ?"
+    type_params = [selected_type]
+
 
 # --- Summary by Sender (horizontal bar) ---
-st.subheader("Amount by Sender")
+st.subheader(f"Amount by {labels.get('sender_label', 'Sender')}")
 
-vendor_df = conn.query(
+vendor_df = session.sql(
     f"""
     SELECT
-        vendor_name,
-        document_count,
-        total_amount,
-        avg_amount
-    FROM {DB}.V_SUMMARY_BY_VENDOR
+        ef.field_1          AS vendor_name,
+        COUNT(*)            AS document_count,
+        SUM(ef.field_10)    AS total_amount,
+        AVG(ef.field_10)    AS avg_amount
+    FROM {DB}.EXTRACTED_FIELDS ef
+        JOIN {DB}.RAW_DOCUMENTS rd ON ef.file_name = rd.file_name
+    WHERE ef.field_1 IS NOT NULL {type_and_clause}
+    GROUP BY ef.field_1
     ORDER BY total_amount DESC
     LIMIT 15
     """,
-    ttl=60,
-)
+    params=type_params,
+).to_pandas()
 
 if len(vendor_df) > 0:
     fig_vendor = px.bar(
@@ -39,7 +56,7 @@ if len(vendor_df) > 0:
         orientation="h",
         color="TOTAL_AMOUNT",
         color_continuous_scale="Blues",
-        labels={"TOTAL_AMOUNT": "Total Amount ($)", "VENDOR_NAME": "Sender"},
+        labels={"TOTAL_AMOUNT": f"{labels.get('amount_label', 'Total Amount')} ($)", "VENDOR_NAME": labels.get("sender_label", "Sender")},
         text_auto="$.2s",
     )
     fig_vendor.update_layout(
@@ -60,21 +77,27 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Monthly Trend")
-    monthly_df = conn.query(
+    monthly_df = session.sql(
         f"""
-        SELECT month, document_count, total_amount, total_tax
-        FROM {DB}.V_MONTHLY_TREND
+        SELECT
+            DATE_TRUNC('month', ef.field_4)  AS month,
+            COUNT(*)                           AS document_count,
+            SUM(ef.field_10)                   AS total_amount
+        FROM {DB}.EXTRACTED_FIELDS ef
+            JOIN {DB}.RAW_DOCUMENTS rd ON ef.file_name = rd.file_name
+        WHERE ef.field_4 IS NOT NULL {type_and_clause}
+        GROUP BY DATE_TRUNC('month', ef.field_4)
         ORDER BY month
         """,
-        ttl=60,
-    )
+        params=type_params,
+    ).to_pandas()
 
     if len(monthly_df) > 0:
         fig_monthly = px.area(
             monthly_df,
             x="MONTH",
             y="TOTAL_AMOUNT",
-            labels={"TOTAL_AMOUNT": "Total Amount ($)", "MONTH": "Month"},
+            labels={"TOTAL_AMOUNT": f"{labels.get('amount_label', 'Total Amount')} ($)", "MONTH": "Month"},
             color_discrete_sequence=["#1a237e"],
         )
         fig_monthly.update_layout(
@@ -89,15 +112,44 @@ with col1:
 
 with col2:
     st.subheader("Aging Distribution")
-    aging_df = conn.query(
+    # Query V_DOCUMENT_LEDGER directly (instead of V_AGING_SUMMARY) so we
+    # can filter by doc_type.
+    aging_df = session.sql(
         f"""
-        SELECT aging_bucket, document_count, total_amount, sort_order
-        FROM {DB}.V_AGING_SUMMARY
+        SELECT
+            aging_bucket,
+            COUNT(*)              AS document_count,
+            SUM(total_amount)     AS total_amount,
+            sort_order
+        FROM (
+            SELECT
+                total_amount,
+                doc_type,
+                CASE
+                    WHEN due_date IS NULL              THEN 'N/A'
+                    WHEN due_date >= CURRENT_DATE()    THEN 'Current'
+                    WHEN DATEDIFF('day', due_date, CURRENT_DATE()) <= 30  THEN '1-30 Days'
+                    WHEN DATEDIFF('day', due_date, CURRENT_DATE()) <= 60  THEN '31-60 Days'
+                    WHEN DATEDIFF('day', due_date, CURRENT_DATE()) <= 90  THEN '61-90 Days'
+                    ELSE '90+ Days'
+                END AS aging_bucket,
+                CASE
+                    WHEN due_date IS NULL              THEN 99
+                    WHEN due_date >= CURRENT_DATE()    THEN 0
+                    WHEN DATEDIFF('day', due_date, CURRENT_DATE()) <= 30  THEN 1
+                    WHEN DATEDIFF('day', due_date, CURRENT_DATE()) <= 60  THEN 2
+                    WHEN DATEDIFF('day', due_date, CURRENT_DATE()) <= 90  THEN 3
+                    ELSE 4
+                END AS sort_order
+            FROM {DB}.V_DOCUMENT_LEDGER
+        ) sub
         WHERE aging_bucket != 'N/A'
+            {"AND doc_type = ?" if type_params else ""}
+        GROUP BY aging_bucket, sort_order
         ORDER BY sort_order
         """,
-        ttl=30,
-    )
+        params=type_params,
+    ).to_pandas()
 
     if len(aging_df) > 0:
         color_map = {
@@ -128,20 +180,26 @@ st.divider()
 # --- Top Line Items ---
 st.subheader("Top 20 Items by Amount")
 
-top_items_df = conn.query(
+# Join EXTRACTED_TABLE_DATA with RAW_DOCUMENTS so we can filter by doc_type.
+top_items_df = session.sql(
     f"""
     SELECT
-        item_description,
-        category,
-        appearance_count,
-        total_quantity,
-        avg_unit_price,
-        total_spend
-    FROM {DB}.V_TOP_LINE_ITEMS
+        etd.col_1               AS item_description,
+        etd.col_2               AS category,
+        COUNT(*)                AS appearance_count,
+        SUM(etd.col_3)          AS total_quantity,
+        AVG(etd.col_4)          AS avg_unit_price,
+        SUM(etd.col_5)          AS total_spend
+    FROM {DB}.EXTRACTED_TABLE_DATA etd
+        JOIN {DB}.RAW_DOCUMENTS rd ON etd.file_name = rd.file_name
+    WHERE etd.col_1 IS NOT NULL
+        {"AND rd.doc_type = ?" if type_params else ""}
+    GROUP BY etd.col_1, etd.col_2
+    ORDER BY total_spend DESC
     LIMIT 20
     """,
-    ttl=60,
-)
+    params=type_params,
+).to_pandas()
 
 if len(top_items_df) > 0:
     st.dataframe(

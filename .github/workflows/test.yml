@@ -1,0 +1,106 @@
+name: AI Extract POC Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'poc/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'poc/**'
+
+env:
+  PYTHON_VERSION: '3.11'
+  POC_DB: AI_EXTRACT_POC
+  POC_SCHEMA: DOCUMENTS
+  POC_WH: AI_EXTRACT_WH
+  POC_ROLE: AI_EXTRACT_APP
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Unit tests — no Snowflake connection required
+  # -----------------------------------------------------------------------
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: poc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Run unit tests
+        run: uv run pytest tests/test_normalize_unit.py tests/test_review_helpers.py tests/test_config_helpers.py tests/test_edge_cases.py -v
+
+      - name: Lint — compile check
+        run: |
+          uv run python -m py_compile streamlit/streamlit_app.py
+          uv run python -m py_compile streamlit/config.py
+          for f in streamlit/pages/*.py; do
+            uv run python -m py_compile "$f"
+          done
+
+  # -----------------------------------------------------------------------
+  # SQL integration tests — requires Snowflake connection
+  # -----------------------------------------------------------------------
+  sql-tests:
+    name: SQL Integration Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    defaults:
+      run:
+        working-directory: poc
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      POC_CONNECTION: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Configure Snowflake connection
+        run: |
+          mkdir -p ~/.snowflake
+          cat > ~/.snowflake/connections.toml <<EOF
+          [ci]
+          account = "${SNOWFLAKE_ACCOUNT}"
+          user = "${SNOWFLAKE_USER}"
+          password = "${SNOWFLAKE_PASSWORD}"
+          database = "${POC_DB}"
+          schema = "${POC_SCHEMA}"
+          warehouse = "${POC_WH}"
+          role = "${POC_ROLE}"
+          EOF
+
+      - name: Run SQL integration tests
+        run: |
+          uv run pytest tests/ \
+            --ignore=tests/test_e2e \
+            -v --tb=short \
+            --junitxml=test-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: poc/test-results.xml

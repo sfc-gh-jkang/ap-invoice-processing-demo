@@ -9,6 +9,7 @@
 -- Run this AFTER extraction is working (scripts 01-05).
 -- =============================================================================
 
+USE ROLE AI_EXTRACT_APP;
 USE DATABASE AI_EXTRACT_POC;
 USE SCHEMA DOCUMENTS;
 USE WAREHOUSE AI_EXTRACT_WH;
@@ -72,8 +73,13 @@ CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS PYPI_ACCESS_INTEGRATION
     ENABLED = TRUE
     COMMENT = 'Allow pip install from PyPI for Container Runtime';
 
--- Switch back to your working role (must be the owner of the POC database)
-USE ROLE ACCOUNTADMIN;  -- <-- EDIT to the role that owns AI_EXTRACT_POC
+-- Switch back to POC role for app creation
+-- Grant the POC role access to the EAI and compute pool
+GRANT USAGE ON INTEGRATION PYPI_ACCESS_INTEGRATION TO ROLE AI_EXTRACT_APP;
+GRANT USAGE ON COMPUTE POOL AI_EXTRACT_POC_POOL TO ROLE AI_EXTRACT_APP;
+GRANT BIND SERVICE ENDPOINT ON ACCOUNT TO ROLE AI_EXTRACT_APP;
+
+USE ROLE AI_EXTRACT_APP;
 USE DATABASE AI_EXTRACT_POC;
 USE SCHEMA DOCUMENTS;
 

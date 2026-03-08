@@ -59,7 +59,8 @@ class TestDashboardKPIs:
 
     def test_unique_senders(self, page, app_url):
         _navigate(page, app_url)
-        senders = get_metric_value(page, "Unique Senders")
+        # Label is dynamic (e.g. "Unique Vendor / Sender") so match prefix
+        senders = get_metric_value(page, "Unique")
         assert senders is not None and senders >= 1
 
     def test_pipeline_progress_section(self, page, app_url):
@@ -67,6 +68,40 @@ class TestDashboardKPIs:
         progress = get_metric_value(page, "Pipeline Progress")
         # Pipeline progress renders as "5/5 processed" — we extract the leading digit
         assert progress is not None and progress >= 5
+
+
+class TestDashboardDocTypeFilter:
+    """Verify Document Type filter on Dashboard."""
+
+    def test_doc_type_selectbox_exists(self, page, app_url):
+        """Dashboard should have a Document Type selectbox."""
+        _navigate(page, app_url)
+        selectboxes = page.locator('[data-testid="stSelectbox"]')
+        assert selectboxes.count() >= 1, "No selectbox found — Document Type filter missing"
+
+    def test_doc_type_selectbox_has_all_option(self, page, app_url):
+        """Document Type selectbox should include 'ALL' option."""
+        _navigate(page, app_url)
+        selectboxes = page.locator('[data-testid="stSelectbox"]')
+        if selectboxes.count() < 1:
+            pytest.skip("No selectbox on Dashboard")
+        # Click the first selectbox to open dropdown
+        selectboxes.first.click()
+        page.wait_for_timeout(500)
+        options = page.locator('[role="option"]')
+        option_texts = [options.nth(i).inner_text() for i in range(options.count())]
+        # Close dropdown
+        page.keyboard.press("Escape")
+        assert any("ALL" in t.upper() for t in option_texts), (
+            f"Expected 'ALL' in Document Type options, got: {option_texts}"
+        )
+
+    def test_kpis_render_after_doc_type_filter(self, page, app_url):
+        """KPI cards should still render when Document Type is set to ALL."""
+        _navigate(page, app_url)
+        # KPIs should be visible with the default filter
+        metrics = page.locator('[data-testid="stMetric"]')
+        assert metrics.count() >= 4, f"Expected >=4 KPI cards, got {metrics.count()}"
 
 
 class TestDashboardRecentDocuments:

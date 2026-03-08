@@ -43,10 +43,16 @@ class TestAnalyticsSmoke:
 class TestAnalyticsCharts:
     """Verify chart sections render."""
 
+    def test_doc_type_filter_exists(self, page, app_url):
+        """Analytics page should have a Document Type selectbox."""
+        _navigate(page, app_url)
+        selectboxes = page.locator('[data-testid="stSelectbox"]')
+        assert selectboxes.count() >= 1, "No Document Type selectbox found on Analytics page"
+
     def test_vendor_chart_section(self, page, app_url):
         _navigate(page, app_url)
         page_text = page.inner_text("body")
-        assert "Amount by Sender" in page_text, "Vendor chart section not found"
+        assert "Amount by" in page_text, "Vendor chart section not found"
 
     def test_monthly_trend_section(self, page, app_url):
         _navigate(page, app_url)

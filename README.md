@@ -351,6 +351,34 @@ convenience-store-accounts-payable/
 
 ---
 
+## AI_EXTRACT POC Kit
+
+The `poc/` directory contains a standalone, reusable **AI_EXTRACT POC Kit** — a complete proof-of-concept for extracting structured data from any document type (invoices, contracts, receipts) using Snowflake Cortex AI_EXTRACT.
+
+### Key Features Beyond the Demo App
+
+| Feature | Description |
+|---|---|
+| **Multi-document-type support** | Configuration-driven labels/prompts per document type via `DOCUMENT_TYPE_CONFIG` table |
+| **Review workflow** | Inline `st.data_editor` with append-only audit trail (`INVOICE_REVIEW` table) |
+| **RBAC** | Dedicated `AI_EXTRACT_APP` role with least-privilege grants (not ACCOUNTADMIN) |
+| **Parameterized queries** | All user-facing SQL uses `params=[]` — no SQL injection via f-strings |
+| **~421 automated tests** | 16 non-E2E test files + 5 Playwright E2E test files covering data quality, RBAC, concurrency, schema drift, and every Streamlit page |
+
+### Cross-Cloud Validation
+
+The POC has been deployed and fully tested on all three Snowflake clouds with zero failures:
+
+| Cloud | Region | Non-E2E | E2E | Total |
+|---|---|---|---|---|
+| **AWS** | US East 1 | 340 passed | 71 passed | **411 passed** |
+| **Azure** | East US 2 | 350 passed | 71 passed | **421 passed** |
+| **GCP** | US Central 1 | 350 passed | 71 passed | **421 passed** |
+
+See [`poc/README.md`](poc/README.md) for the full setup guide, SQL walkthrough, and test documentation.
+
+---
+
 ## Design
 
 See [DESIGN.md](DESIGN.md) for the original design specification — principles, user stories, functional requirements, tech stack decisions, data flow diagrams, and success criteria.

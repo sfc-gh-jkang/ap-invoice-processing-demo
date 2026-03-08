@@ -4,7 +4,7 @@ Landing page with pipeline status and overview.
 """
 
 import streamlit as st
-from config import DB
+from config import DB, get_session
 
 st.set_page_config(
     page_title="AI_EXTRACT POC",
@@ -22,12 +22,11 @@ st.markdown(
 st.divider()
 
 # --- Live Pipeline Stats ---
-conn = st.connection("snowflake")
+session = get_session()
 
-status = conn.query(
-    f"SELECT * FROM {DB}.V_EXTRACTION_STATUS",
-    ttl=10,
-)
+status = session.sql(
+    f"SELECT * FROM {DB}.V_EXTRACTION_STATUS"
+).to_pandas()
 
 if len(status) > 0:
     s = status.iloc[0]
@@ -102,15 +101,14 @@ st.graphviz_chart(
 st.divider()
 
 # --- Quick summary from extracted data ---
-summary = conn.query(
+summary = session.sql(
     f"""
     SELECT
         (SELECT COUNT(*) FROM {DB}.EXTRACTED_FIELDS) AS documents,
         (SELECT COUNT(*) FROM {DB}.EXTRACTED_TABLE_DATA) AS line_items,
         (SELECT COUNT(DISTINCT field_1) FROM {DB}.EXTRACTED_FIELDS WHERE field_1 IS NOT NULL) AS unique_senders
-    """,
-    ttl=30,
-)
+    """
+).to_pandas()
 
 if len(summary) > 0:
     r = summary.iloc[0]
@@ -133,5 +131,8 @@ view extracted fields alongside the source PDF
 
 **Analytics** — Charts and breakdowns by
 vendor, time period, and line items
+
+**Review & Approve** — Review extracted invoices
+and record approval decisions
 """
     )

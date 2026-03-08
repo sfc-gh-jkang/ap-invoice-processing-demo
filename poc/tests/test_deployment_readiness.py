@@ -223,7 +223,7 @@ class TestStreamlitDeployment:
         rows = sf_cursor.fetchall()
         file_names = [str(row[0]) for row in rows]
         page_files = [f for f in file_names if "pages/" in f.lower()]
-        assert len(page_files) >= 3, (
-            f"Expected at least 3 page files in pages/ on STREAMLIT_STAGE, "
+        assert len(page_files) >= 4, (
+            f"Expected at least 4 page files in pages/ on STREAMLIT_STAGE, "
             f"found {len(page_files)}: {page_files}"
         )

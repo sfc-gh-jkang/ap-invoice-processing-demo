@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # deploy_poc.sh — Deploy the AI_EXTRACT POC kit to a Snowflake account
-# Usage: ./poc/deploy_poc.sh [--connection <name>]
+# Usage: ./poc/deploy_poc.sh [--connection <name>] [--skip-extraction]
 #        ./poc/deploy_poc.sh [<connection_name>]
 #        POC_CONNECTION=<name> ./poc/deploy_poc.sh
 set -euo pipefail
 
 # ---------- Parse arguments ----------
 _POSITIONAL_CONNECTION=""
+SKIP_EXTRACTION="${SKIP_EXTRACTION:-false}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --connection|-c)
@@ -17,9 +18,13 @@ while [[ $# -gt 0 ]]; do
             _POSITIONAL_CONNECTION="${1#*=}"
             shift
             ;;
+        --skip-extraction)
+            SKIP_EXTRACTION="true"
+            shift
+            ;;
         -*)
             echo "Unknown option: $1" >&2
-            echo "Usage: ./poc/deploy_poc.sh [--connection <name>]" >&2
+            echo "Usage: ./poc/deploy_poc.sh [--connection <name>] [--skip-extraction]" >&2
             exit 1
             ;;
         *)
@@ -35,6 +40,7 @@ POC_SCHEMA="${POC_SCHEMA:-DOCUMENTS}"
 POC_WH="${POC_WH:-AI_EXTRACT_WH}"
 POC_STAGE="${POC_STAGE:-DOCUMENT_STAGE}"
 POC_POOL="${POC_POOL:-AI_EXTRACT_POC_POOL}"
+POC_ROLE="${POC_ROLE:-AI_EXTRACT_APP}"
 CONNECTION="${POC_CONNECTION:-${_POSITIONAL_CONNECTION:-default}}"
 CONNECTION_FLAG="-c $CONNECTION"
 
@@ -47,6 +53,7 @@ run_sql() {
     local tmp_file
     tmp_file=$(mktemp)
     sed \
+        -e "s/AI_EXTRACT_APP/${POC_ROLE}/g" \
         -e "s/AI_EXTRACT_POC/${POC_DB}/g" \
         -e "s/AI_EXTRACT_WH/${POC_WH}/g" \
         -e "s/AI_EXTRACT_POC_POOL/${POC_POOL}/g" \
@@ -81,11 +88,12 @@ echo "  Database:      ${POC_DB}"
 echo "  Schema:        ${POC_SCHEMA}"
 echo "  Warehouse:     ${POC_WH}"
 echo "  Compute Pool:  ${POC_POOL}"
+echo "  Role:          ${POC_ROLE}"
 echo "  Connection:    ${CONNECTION}"
 echo ""
 
 # ---------- Step 1: Create Snowflake objects ----------
-echo "[1/7] Creating database, schema, warehouse, stage..."
+echo "[1/11] Creating database, schema, warehouse, stage..."
 
 run_sql "$SCRIPT_DIR/sql/01_setup.sql"
 
@@ -93,7 +101,7 @@ echo "   Infrastructure created."
 
 # ---------- Step 2: Create tables ----------
 echo ""
-echo "[2/7] Creating tables (RAW_DOCUMENTS, EXTRACTED_FIELDS, EXTRACTED_TABLE_DATA)..."
+echo "[2/11] Creating tables (RAW_DOCUMENTS, EXTRACTED_FIELDS, EXTRACTED_TABLE_DATA)..."
 
 run_sql "$SCRIPT_DIR/sql/02_tables.sql"
 
@@ -101,7 +109,7 @@ echo "   Tables created."
 
 # ---------- Step 3: Stage sample invoices ----------
 echo ""
-echo "[3/7] Staging sample PDF invoices..."
+echo "[3/11] Staging sample PDF invoices..."
 
 # Check multiple locations for sample documents (first match wins)
 INVOICE_DIR="$REPO_DIR/data/invoices"
@@ -154,17 +162,22 @@ run_sql "$SCRIPT_DIR/sql/02_tables.sql"
 echo "   Files staged and registered."
 
 # ---------- Step 4: Batch extraction ----------
-echo ""
-echo "[4/7] Running batch AI_EXTRACT on all staged documents..."
-echo "   (This may take several minutes depending on document count)"
+if [[ "${SKIP_EXTRACTION}" == "true" ]]; then
+    echo ""
+    echo "[4/11] Skipping batch extraction (--skip-extraction flag set)."
+else
+    echo ""
+    echo "[4/11] Running batch AI_EXTRACT on all staged documents..."
+    echo "   (This may take several minutes depending on document count)"
 
-run_sql "$SCRIPT_DIR/sql/04_batch_extract.sql"
+    run_sql "$SCRIPT_DIR/sql/04_batch_extract.sql"
 
-echo "   Extraction complete."
+    echo "   Extraction complete."
+fi
 
 # ---------- Step 5: Create views ----------
 echo ""
-echo "[5/7] Creating analytical views..."
+echo "[5/11] Creating analytical views..."
 
 run_sql "$SCRIPT_DIR/sql/05_views.sql"
 
@@ -172,7 +185,7 @@ echo "   Views created."
 
 # ---------- Step 6: Set up automation ----------
 echo ""
-echo "[6/7] Setting up Stream + Task automation..."
+echo "[6/11] Setting up Stream + Task automation..."
 
 run_sql "$SCRIPT_DIR/sql/06_automate.sql"
 
@@ -180,7 +193,7 @@ echo "   Automation configured."
 
 # ---------- Step 7: Deploy Streamlit app ----------
 echo ""
-echo "[7/7] Deploying POC Streamlit dashboard..."
+echo "[7/11] Deploying POC Streamlit dashboard..."
 
 # Upload Streamlit files
 snow sql $CONNECTION_FLAG -q "
@@ -201,6 +214,10 @@ snow sql $CONNECTION_FLAG -q "
         AUTO_COMPRESS = FALSE OVERWRITE = TRUE;
     PUT file://${SCRIPT_DIR}/streamlit/pages/2_Analytics.py @STREAMLIT_STAGE/pages/
         AUTO_COMPRESS = FALSE OVERWRITE = TRUE;
+    PUT file://${SCRIPT_DIR}/streamlit/pages/3_Review.py @STREAMLIT_STAGE/pages/
+        AUTO_COMPRESS = FALSE OVERWRITE = TRUE;
+    PUT file://${SCRIPT_DIR}/streamlit/pages/4_Admin.py @STREAMLIT_STAGE/pages/
+        AUTO_COMPRESS = FALSE OVERWRITE = TRUE;
 "
 
 # Create compute pool + Streamlit app (uses dollar-quoted blocks handled by run_sql)
@@ -208,9 +225,101 @@ run_sql "$SCRIPT_DIR/sql/07_deploy_streamlit.sql"
 
 echo "   Dashboard deployed."
 
+# ---------- Step 8: Create writeback table + review view ----------
+echo ""
+echo "[8/11] Creating writeback table and review view..."
+
+run_sql "$SCRIPT_DIR/sql/08_writeback.sql"
+
+echo "   Writeback table and review view created."
+
+# ---------- Step 9: Create document type config ----------
+echo ""
+echo "[9/11] Creating document type configuration..."
+
+run_sql "$SCRIPT_DIR/sql/09_document_types.sql"
+
+echo "   Document type config created."
+
+# ---------- Step 10: Production hardening (optional) ----------
+if [[ "${POC_HARDEN:-true}" == "true" ]]; then
+    echo ""
+    echo "[10/11] Applying production hardening..."
+
+    run_sql "$SCRIPT_DIR/sql/10_harden.sql"
+
+    echo "   Hardening applied (ownership → SYSADMIN, managed access, resource monitor)."
+else
+    echo ""
+    echo "[10/11] Skipping hardening (POC_HARDEN=false)."
+fi
+
+# ---------- Step 11: Extraction alerts ----------
+echo ""
+echo "[11/11] Setting up extraction failure alerts..."
+
+run_sql "$SCRIPT_DIR/sql/11_alerts.sql"
+
+echo "   Alerts configured."
+
+# ---------- Post-deployment validation ----------
+echo ""
+echo "[Validation] Checking deployment artifacts..."
+
+VALIDATION_PASSED=true
+
+# Check required tables
+for TABLE in RAW_DOCUMENTS EXTRACTED_FIELDS EXTRACTED_TABLE_DATA DOCUMENT_TYPE_CONFIG INVOICE_REVIEW; do
+    COUNT=$(snow sql $CONNECTION_FLAG -q "SELECT COUNT(*) AS c FROM ${POC_DB}.${POC_SCHEMA}.${TABLE}" --format json 2>/dev/null | grep -o '"c":[0-9]*' | head -1)
+    if [ -z "$COUNT" ]; then
+        echo "   FAIL: Table $TABLE not found or not queryable"
+        VALIDATION_PASSED=false
+    else
+        echo "   OK: Table $TABLE exists"
+    fi
+done
+
+# Check required views
+for VIEW in V_DOCUMENT_SUMMARY V_INVOICE_SUMMARY; do
+    snow sql $CONNECTION_FLAG -q "SELECT 1 FROM ${POC_DB}.${POC_SCHEMA}.${VIEW} LIMIT 0" > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo "   OK: View $VIEW exists"
+    else
+        echo "   FAIL: View $VIEW not found"
+        VALIDATION_PASSED=false
+    fi
+done
+
+# Check Streamlit stage files
+for FILE in streamlit_app.py config.py environment.yml; do
+    snow sql $CONNECTION_FLAG -q "LIST @${POC_DB}.${POC_SCHEMA}.STREAMLIT_STAGE/${FILE}" > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo "   OK: Stage file $FILE uploaded"
+    else
+        echo "   FAIL: Stage file $FILE missing"
+        VALIDATION_PASSED=false
+    fi
+done
+
+# Check page files
+for PAGE in 0_Dashboard.py 1_Document_Viewer.py 2_Analytics.py 3_Review.py 4_Admin.py; do
+    snow sql $CONNECTION_FLAG -q "LIST @${POC_DB}.${POC_SCHEMA}.STREAMLIT_STAGE/pages/${PAGE}" > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo "   OK: Page $PAGE uploaded"
+    else
+        echo "   FAIL: Page $PAGE missing"
+        VALIDATION_PASSED=false
+    fi
+done
+
 echo ""
 echo "=============================================="
-echo " POC Deploy Complete!"
+if [ "$VALIDATION_PASSED" = true ]; then
+    echo " POC Deploy Complete! All checks passed."
+else
+    echo " POC Deploy Complete (with warnings)."
+    echo " Some validation checks failed — review output above."
+fi
 echo "=============================================="
 echo ""
 echo "Open Snowsight and navigate to:"

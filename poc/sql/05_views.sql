@@ -6,6 +6,7 @@
 -- EXTRACTED_TABLE_DATA columns from 02_tables.sql.
 -- =============================================================================
 
+USE ROLE AI_EXTRACT_APP;
 USE DATABASE AI_EXTRACT_POC;
 USE SCHEMA DOCUMENTS;
 USE WAREHOUSE AI_EXTRACT_WH;
@@ -32,6 +33,7 @@ CREATE OR REPLACE VIEW V_DOCUMENT_LEDGER AS
 SELECT
     ef.record_id,
     ef.file_name,
+    rd.doc_type,
     ef.field_1       AS vendor_name,        -- rename to match your field
     ef.field_2       AS document_number,     -- rename to match your field
     ef.field_3       AS reference,           -- rename to match your field
@@ -58,7 +60,8 @@ SELECT
         WHEN DATEDIFF(day, ef.field_5, CURRENT_DATE()) BETWEEN 61 AND 90 THEN '61-90 Days'
         ELSE '90+ Days'
     END AS aging_bucket
-FROM EXTRACTED_FIELDS ef;
+FROM EXTRACTED_FIELDS ef
+    JOIN RAW_DOCUMENTS rd ON ef.file_name = rd.file_name;
 
 -- ---------------------------------------------------------------------------
 -- V_SUMMARY_BY_VENDOR: Aggregate metrics grouped by vendor/sender

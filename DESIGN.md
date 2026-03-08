@@ -141,6 +141,11 @@ The SE generates new PDF invoices directly inside Snowflake using a Python UDTF 
 | FR-010 | Generate PDF invoices inside Snowflake via a Python UDTF (no local dependencies for live demo) |
 | FR-011 | Support dual-environment deployment via dynamic config (CURRENT_DATABASE/CURRENT_SCHEMA) with zero hardcoded values |
 | FR-012 | Include a comprehensive E2E test suite (Playwright) covering all pages |
+| FR-013 | Support an append-only review/correction workflow with inline `st.data_editor` and `INVOICE_REVIEW` table |
+| FR-014 | Use a dedicated RBAC role (`AI_EXTRACT_APP`) with least-privilege grants — not ACCOUNTADMIN |
+| FR-015 | Support multiple document types (invoices, contracts, receipts) via configuration table with per-type prompts and UI labels |
+| FR-016 | Use parameterized SQL queries (`params=[]`) throughout the Streamlit app to prevent SQL injection |
+| FR-017 | Deploy and validate on all three Snowflake clouds (AWS, Azure, GCP) with identical test results |
 
 ### Key Entities
 
@@ -249,6 +254,9 @@ Stored Proc SP_EXTRACT_NEW_INVOICES:
 | SC-003 | Live extraction of 5 demo invoices completes within 2 minutes and results appear in the app |
 | SC-004 | An SE can deploy the full demo in under 15 minutes |
 | SC-005 | The demo tells a complete story (ingest → extract → automate → visualize) in a 20-minute meeting |
+| SC-006 | ~421 automated tests pass (non-E2E + E2E) covering SQL objects, data quality, RBAC, concurrency, and every Streamlit page |
+| SC-007 | Full test suite passes on all three Snowflake clouds (AWS, Azure, GCP) with zero failures |
+| SC-008 | App runs with a least-privilege RBAC role (not ACCOUNTADMIN) on all three clouds |
 
 ---
 
@@ -290,7 +298,8 @@ Stored Proc SP_EXTRACT_NEW_INVOICES:
 - `teardown.sh` — clean removal script (env var configurable)
 
 ### Phase 8 — E2E Test Suite (Playwright)
-- 146 tests across 8 test files (6 functional + 2 integration)
+- Original demo app: 146 tests across 8 test files (6 functional + 2 integration)
+- POC kit: ~421 tests across 21 test files (16 non-E2E + 5 E2E)
 - Session-scoped server, fixtures, page object helpers
 
 ### Phase 9 — Documentation & Screenshots
@@ -305,3 +314,31 @@ Stored Proc SP_EXTRACT_NEW_INVOICES:
 ### Phase 11 — Public Sharing Prep
 - `sql/08_grants.sql` — re-runnable role grants
 - Security audit, genericized scripts, Apache 2.0 license
+
+### Phase 12 — AI_EXTRACT POC Kit
+- Standalone `poc/` directory with SQL scripts, Streamlit app, and comprehensive test suite
+- Generic column names (`field_1`...`field_10`, `col_1`...`col_5`) for any document type
+- Review workflow with append-only `INVOICE_REVIEW` table and `V_INVOICE_SUMMARY` view
+- Automated deploy script (`deploy_poc.sh`) with env var configuration
+
+### Phase 13 — RBAC & Security Hardening
+- Dedicated `AI_EXTRACT_APP` role with least-privilege grants
+- `SNOWFLAKE.CORTEX_USER` database role grant
+- Replaced ACCOUNTADMIN usage throughout app and tests
+- Parameterized all user-facing SQL queries to prevent SQL injection (replaced f-string interpolation with `params=[]`)
+- `POC_ROLE` env var in `conftest.py` for cross-role testing
+
+### Phase 14 — Multi-Document-Type Support
+- `DOCUMENT_TYPE_CONFIG` table with per-type extraction prompts and UI labels (VARIANT JSON)
+- `RAW_DOCUMENTS.doc_type` column (DEFAULT `'INVOICE'`) tags each file
+- Three built-in types: INVOICE, CONTRACT, RECEIPT
+- All Streamlit pages wired with document type filter dropdown
+- `config.py` exposes `get_doc_type_labels()` and `get_doc_types()` with fallback defaults
+- Views (`V_DOCUMENT_LEDGER`, `V_INVOICE_SUMMARY`) include `doc_type` via JOIN to `RAW_DOCUMENTS`
+
+### Phase 15 — Cross-Cloud Validation
+- Deployed identical infrastructure to AWS, Azure, and GCP Snowflake accounts
+- Setup script provisions: tables, views, RBAC role, grants, stage uploads
+- ~421 tests (non-E2E + E2E) pass on all three clouds with zero failures
+- Validated RBAC role works identically across clouds
+- Documented cross-cloud testing commands and env var configuration

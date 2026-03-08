@@ -51,12 +51,20 @@ SET poc_stage     = 'DOCUMENT_STAGE';
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
--- Step 1: Grant Cortex access to your role (requires ACCOUNTADMIN)
+-- Step 1: Create dedicated POC role (requires ACCOUNTADMIN)
 -- ---------------------------------------------------------------------------
+-- ACCOUNTADMIN is used ONLY here — to create the role, grant Cortex access,
+-- and enable cross-region inference. All subsequent scripts use AI_EXTRACT_APP.
+
 USE ROLE ACCOUNTADMIN;
 
--- Replace YOUR_ROLE with the role you'll use for this POC
-GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER TO ROLE SYSADMIN;  -- <-- EDIT THIS ROLE
+-- Create a dedicated role for this POC — no need to run as ACCOUNTADMIN day-to-day
+SET poc_role = 'AI_EXTRACT_APP';   -- <-- EDIT if you want a different role name
+CREATE ROLE IF NOT EXISTS IDENTIFIER($poc_role);
+GRANT ROLE IDENTIFIER($poc_role) TO ROLE SYSADMIN;   -- inherit into SYSADMIN hierarchy
+
+-- Grant Cortex AI access to the POC role
+GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER TO ROLE IDENTIFIER($poc_role);
 
 -- Enable cross-region inference so AI_EXTRACT works in any region.
 -- Without this, accounts in GCP or non-primary AWS/Azure regions will get:
@@ -65,8 +73,14 @@ GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER TO ROLE SYSADMIN;  -- <-- EDIT THIS RO
 ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = 'ANY_REGION';
 
 -- ---------------------------------------------------------------------------
--- Step 2: Create database, schema, warehouse
+-- Step 2: Create database, schema, warehouse (as POC role)
 -- ---------------------------------------------------------------------------
+-- Grant privileges needed to create objects, then switch to the POC role
+GRANT CREATE DATABASE ON ACCOUNT TO ROLE IDENTIFIER($poc_role);
+GRANT CREATE WAREHOUSE ON ACCOUNT TO ROLE IDENTIFIER($poc_role);
+
+USE ROLE IDENTIFIER($poc_role);
+
 CREATE DATABASE IF NOT EXISTS IDENTIFIER($poc_db);
 USE DATABASE IDENTIFIER($poc_db);
 

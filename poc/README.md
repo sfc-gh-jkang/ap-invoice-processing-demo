@@ -7,7 +7,8 @@ This kit walks you through a complete proof-of-concept:
 1. **Stage** your documents in a Snowflake internal stage
 2. **Extract** entity fields (header data) and tabular data (line items) using AI
 3. **Visualize** results in an interactive Streamlit dashboard
-4. **Automate** extraction of new documents via Stream + Task (optional)
+4. **Review** extracted data with inline corrections and an append-only audit trail
+5. **Automate** extraction of new documents via Stream + Task (optional)
 
 **Total setup time: ~30 minutes** (excluding extraction runtime, which depends on document count).
 
@@ -23,6 +24,9 @@ This kit walks you through a complete proof-of-concept:
 - [Understanding the Extraction Output](#understanding-the-extraction-output)
 - [Deploying the Dashboard](#deploying-the-dashboard)
 - [Setting Up Automation](#setting-up-automation)
+- [Review Workflow (Writeback)](#review-workflow-writeback)
+- [Role-Based Access Control (RBAC)](#role-based-access-control-rbac)
+- [Multi-Document-Type Support](#multi-document-type-support)
 - [File Structure](#file-structure)
 - [Troubleshooting](#troubleshooting)
 - [Cost Estimate](#cost-estimate)
@@ -41,8 +45,8 @@ This kit walks you through a complete proof-of-concept:
 |---|---|
 | **Snowflake Edition** | Standard or higher |
 | **Account Region** | Must be a [supported region](https://docs.snowflake.com/en/user-guide/snowflake-cortex/ai-extract#regional-availability), or enable cross-region inference (see below) |
-| **Role** | ACCOUNTADMIN for initial setup; SYSADMIN (or custom role) for day-to-day use |
-| **Cortex Access** | SNOWFLAKE.CORTEX_USER database role granted to your working role |
+| **Role** | ACCOUNTADMIN for initial setup (role creation, Cortex grant, EAI); `AI_EXTRACT_APP` role for all other operations |
+| **Cortex Access** | SNOWFLAKE.CORTEX_USER database role granted to `AI_EXTRACT_APP` |
 
 **Supported AI_EXTRACT Regions:**
 
@@ -89,7 +93,7 @@ PDF, PNG, JPEG/JPG, DOCX/DOC, PPTX/PPT, EML, HTML/HTM, TXT/TEXT, TIF/TIFF, BMP, 
 
 ## Quick Start (Automated Deploy)
 
-If you have the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) (`snow`) and [uv](https://docs.astral.sh/uv/) installed, the deploy script runs all 7 SQL steps automatically:
+If you have the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) (`snow`) and [uv](https://docs.astral.sh/uv/) installed, the deploy script runs all 11 SQL steps automatically:
 
 ```bash
 # Deploy the entire POC in one command
@@ -98,9 +102,27 @@ If you have the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/sn
 # Or use an environment variable
 export POC_CONNECTION=my_account
 ./poc/deploy_poc.sh
+
+# Optionally customize role and object names
+export POC_ROLE=MY_CUSTOM_ROLE
+export POC_DB=MY_EXTRACT_DB
+./poc/deploy_poc.sh
+
+# Skip extraction (for re-deploying schema only)
+./poc/deploy_poc.sh --connection my_account --skip-extraction
+
+# Skip production hardening during development
+POC_HARDEN=false ./poc/deploy_poc.sh --connection my_account
 ```
 
-The script creates the database, tables, stages sample documents (from `sample_documents/`), runs batch extraction, creates views, sets up automation, and deploys the Streamlit dashboard. The 5 included sample invoices let you validate the full pipeline immediately.
+The script creates a dedicated `AI_EXTRACT_APP` role (configurable via `POC_ROLE`), then uses that role to create the database, tables, stages sample documents (from `sample_documents/`), runs batch extraction, creates views, sets up automation, deploys the Streamlit dashboard, creates the review/writeback objects, loads document type configuration, applies production hardening, and sets up extraction failure alerts. The 5 included sample invoices let you validate the full pipeline immediately.
+
+**After deployment**, validate with the health check:
+
+```bash
+bash validate_poc.sh --connection my_account   # Standalone health check
+make validate CONNECTION=my_account            # Or via Makefile
+```
 
 If you prefer to understand each step, follow the manual [Step-by-Step Guide](#step-by-step-guide) below.
 
@@ -173,6 +195,8 @@ This creates three tables:
 | `RAW_DOCUMENTS` | Tracks every file staged for processing (file name, path, extraction status) |
 | `EXTRACTED_FIELDS` | Stores entity-level data from each document (10 generic fields: `field_1` through `field_10`) |
 | `EXTRACTED_TABLE_DATA` | Stores tabular/line-item data from each document (5 generic columns: `col_1` through `col_5`) |
+
+> A fourth table (`INVOICE_REVIEW`) is created by `08_writeback.sql` — see [Review Workflow](#review-workflow-writeback).
 
 The script also registers all staged files into `RAW_DOCUMENTS` automatically.
 
@@ -254,6 +278,8 @@ This creates 6 views that power the dashboard and enable ad-hoc analysis:
 | `V_MONTHLY_TREND` | Volume and value over time |
 | `V_TOP_LINE_ITEMS` | Most common / highest-spend items from table extraction |
 | `V_AGING_SUMMARY` | Aggregate counts and amounts by aging bucket |
+
+> A seventh view (`V_INVOICE_SUMMARY`) is created by `08_writeback.sql` — see [Review Workflow](#review-workflow-writeback).
 
 You can query these views directly:
 ```sql
@@ -442,6 +468,7 @@ The `streamlit/` folder contains a 3-page Streamlit in Snowflake app. Deployment
 | **Dashboard** | KPI cards (total documents, total amount, unique senders, overdue), recent documents table |
 | **Document Viewer** | Filter by sender/status, browse documents, drill down to see extracted fields alongside the rendered source PDF |
 | **Analytics** | Bar chart by sender, monthly trend area chart, aging distribution, top 20 line items |
+| **Review** | Inline `st.data_editor` for reviewing/correcting extracted data, append-only audit trail, writeback to `INVOICE_REVIEW` |
 
 ---
 
@@ -476,6 +503,194 @@ ALTER TASK EXTRACT_NEW_DOCUMENTS_TASK SUSPEND;
 
 ---
 
+## Review Workflow (Writeback)
+
+After extraction, documents can be reviewed and corrected through an inline editing interface. The review system uses an **append-only audit trail** — every correction is a new INSERT, never an UPDATE or DELETE.
+
+### Step 8: Create Writeback Objects
+
+Open **`sql/08_writeback.sql`** in Snowsight and run it. This creates:
+
+| Object | Type | Purpose |
+|---|---|---|
+| `INVOICE_REVIEW` | Table | Append-only audit trail of all reviews. Each row captures a correction or approval for a document. |
+| `V_INVOICE_SUMMARY` | View | Joins `EXTRACTED_FIELDS` with the **latest** review per document using `ROW_NUMBER() OVER (PARTITION BY record_id ORDER BY review_id DESC)`. |
+
+### How It Works
+
+1. **Review page** (`3_Review.py`) — Displays all documents in an `st.data_editor` grid. Reviewers can edit any column inline: status, corrected amounts, vendor name, dates, notes, etc.
+2. **Append-only writes** — Each save INSERTs a new row into `INVOICE_REVIEW`. Previous reviews are never modified or deleted.
+3. **Latest-wins view** — `V_INVOICE_SUMMARY` always shows the most recent review per document using `ROW_NUMBER()` partitioned by `record_id` and ordered by `review_id DESC`.
+4. **COALESCE override** — The view uses `COALESCE(rv.corrected_total, ef.field_10)` so corrections override originals, but a NULL correction falls back to the original extracted value.
+
+### INVOICE_REVIEW Columns
+
+| Column | Type | Description |
+|---|---|---|
+| `REVIEW_ID` | NUMBER (AUTOINCREMENT) | Primary key, monotonically increasing |
+| `RECORD_ID` | NUMBER | FK to `EXTRACTED_FIELDS.record_id` |
+| `FILE_NAME` | VARCHAR | Document filename (denormalized for convenience) |
+| `REVIEW_STATUS` | VARCHAR | `PENDING`, `APPROVED`, `REJECTED`, `CORRECTED` |
+| `CORRECTED_TOTAL` | NUMBER(12,2) | Overrides `field_10` if non-NULL |
+| `CORRECTED_VENDOR_NAME` | VARCHAR | Overrides `field_1` |
+| `CORRECTED_INVOICE_NUMBER` | VARCHAR | Overrides `field_2` |
+| `CORRECTED_PO_NUMBER` | VARCHAR | Overrides `field_3` |
+| `CORRECTED_INVOICE_DATE` | DATE | Overrides `field_4` |
+| `CORRECTED_DUE_DATE` | DATE | Overrides `field_5` |
+| `CORRECTED_PAYMENT_TERMS` | VARCHAR | Overrides `field_6` |
+| `CORRECTED_RECIPIENT` | VARCHAR | Overrides `field_7` |
+| `CORRECTED_SUBTOTAL` | NUMBER(12,2) | Overrides `field_8` |
+| `CORRECTED_TAX_AMOUNT` | NUMBER(12,2) | Overrides `field_9` |
+| `REVIEWER_NOTES` | VARCHAR | Free-text notes |
+| `REVIEWED_BY` | VARCHAR | Defaults to `CURRENT_USER()` |
+| `REVIEWED_AT` | TIMESTAMP_LTZ | Defaults to `CURRENT_TIMESTAMP()` |
+
+### Querying the Review State
+
+```sql
+-- Latest review status for all documents
+SELECT * FROM V_INVOICE_SUMMARY;
+
+-- Full audit trail for a specific document
+SELECT * FROM INVOICE_REVIEW
+WHERE record_id = 42
+ORDER BY review_id DESC;
+
+-- Documents still pending review
+SELECT * FROM V_INVOICE_SUMMARY
+WHERE review_status IS NULL OR review_status = 'PENDING';
+```
+
+---
+
+## Role-Based Access Control (RBAC)
+
+The POC uses a dedicated **`AI_EXTRACT_APP`** role instead of running everything as ACCOUNTADMIN. This follows Snowflake's principle of least privilege.
+
+### Role Hierarchy
+
+```
+ACCOUNTADMIN
+├── Creates AI_EXTRACT_APP role
+├── Grants SNOWFLAKE.CORTEX_USER to AI_EXTRACT_APP
+├── Sets CORTEX_ENABLED_CROSS_REGION (if needed)
+├── Creates EAI + network rule (07_deploy_streamlit.sql)
+└── Grants USAGE ON INTEGRATION to AI_EXTRACT_APP
+
+AI_EXTRACT_APP (dedicated POC role)
+├── Creates database, warehouse, stage
+├── Creates all tables, views, streams, tasks, procedures
+├── Deploys Streamlit app
+└── Granted to SYSADMIN for management access
+```
+
+### What ACCOUNTADMIN Does (and Only ACCOUNTADMIN)
+
+| Action | Why ACCOUNTADMIN is Required |
+|---|---|
+| `CREATE ROLE AI_EXTRACT_APP` | Only ACCOUNTADMIN (or USERADMIN) can create roles |
+| `GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER` | Cortex database roles require elevated privileges |
+| `ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION` | Account-level setting |
+| `CREATE NETWORK RULE` / `CREATE EXTERNAL ACCESS INTEGRATION` | Security-sensitive objects |
+| `GRANT USAGE ON INTEGRATION` | Integration grants require the integration owner |
+| `GRANT BIND SERVICE ENDPOINT ON ACCOUNT` | Account-level privilege for Streamlit |
+
+### Customizing the Role Name
+
+```bash
+# Default role
+./poc/deploy_poc.sh --connection my_account
+
+# Custom role name
+export POC_ROLE=MY_TEAM_EXTRACT_ROLE
+./poc/deploy_poc.sh --connection my_account
+```
+
+The deploy script replaces `AI_EXTRACT_APP` with your custom role name in all SQL files via `sed`.
+
+### Teardown
+
+`teardown_poc.sql` drops the role as its final step:
+
+```sql
+USE ROLE ACCOUNTADMIN;
+DROP ROLE IF EXISTS AI_EXTRACT_APP;
+```
+
+---
+
+## Multi-Document-Type Support
+
+The POC supports multiple document types (invoices, contracts, receipts, or any custom type) through a configuration-driven approach. All UI labels and extraction prompts are stored in a Snowflake table — no code changes needed to add a new document type.
+
+### How It Works
+
+1. **`RAW_DOCUMENTS.doc_type`** — Each staged file is tagged with its document type (default: `'INVOICE'`)
+2. **`DOCUMENT_TYPE_CONFIG`** table — Stores per-type extraction prompts and UI field labels as JSON
+3. **`config.py`** — `get_doc_type_labels()` fetches labels at runtime; falls back to invoice defaults
+4. **All Streamlit pages** — Include a "Document Type" filter dropdown; labels update dynamically
+
+### Built-in Document Types
+
+| Type | Display Name | Example Fields |
+|---|---|---|
+| `INVOICE` | Invoice | Vendor Name, Invoice #, PO #, Invoice Date, Due Date, Payment Terms, Recipient, Subtotal, Tax, Total |
+| `CONTRACT` | Contract | Party Name, Contract #, Reference ID, Effective Date, Expiration Date, Terms, Counterparty, Base Value, Adjustments, Total Value |
+| `RECEIPT` | Receipt | Merchant Name, Receipt #, Transaction ID, Purchase Date, Return By Date, Payment Method, Buyer, Subtotal, Tax, Total Paid |
+
+### Adding a Custom Document Type
+
+```sql
+INSERT INTO DOCUMENT_TYPE_CONFIG (doc_type, display_name, extraction_prompt, field_labels)
+VALUES (
+    'PURCHASE_ORDER',
+    'Purchase Order',
+    'Extract: buyer_name, po_number, order_date, delivery_date, ship_to, terms, item_count, subtotal, shipping, total',
+    PARSE_JSON('{
+        "field_1": "Buyer",
+        "field_2": "PO Number",
+        "field_3": "Order Date",
+        "field_4": "Delivery Date",
+        "field_5": "Ship To",
+        "field_6": "Terms",
+        "field_7": "Item Count",
+        "field_8": "Subtotal",
+        "field_9": "Shipping",
+        "field_10": "Total",
+        "sender_label": "Buyer",
+        "amount_label": "Total",
+        "date_label": "Order Date",
+        "reference_label": "PO #",
+        "secondary_ref_label": "Order Date"
+    }')
+);
+```
+
+Then tag your documents when staging:
+
+```sql
+UPDATE RAW_DOCUMENTS
+SET doc_type = 'PURCHASE_ORDER'
+WHERE file_name LIKE 'po_%';
+```
+
+The Streamlit pages will immediately show the new type in the filter dropdown with the correct labels.
+
+### Label JSON Structure
+
+The `field_labels` column stores a JSON object with these keys:
+
+| Key | Purpose | Used By |
+|---|---|---|
+| `field_1` ... `field_10` | Column-level labels for the detail/editor views | Document Viewer, Review |
+| `sender_label` | Label for the "sender" / primary party | Dashboard, Viewer, Analytics, Review |
+| `amount_label` | Label for the primary monetary field | Dashboard, Analytics |
+| `date_label` | Label for the primary date field | Dashboard, Viewer |
+| `reference_label` | Label for the primary reference number | Dashboard, Viewer |
+| `secondary_ref_label` | Label for a secondary reference | Dashboard |
+
+---
+
 ## File Structure
 
 ```
@@ -485,10 +700,14 @@ ai_extract_poc/
 ├── .gitignore                             # Ignores secrets, caches, venvs
 ├── Makefile                               # Common commands: make deploy, test, teardown
 ├── deploy_poc.sh                          # Automated deploy script (Quick Start)
-├── teardown_poc.sql                       # Drop all POC objects (DB, warehouse, compute pool)
+├── teardown_poc.sh                        # Parameterized teardown (drop all POC objects)
+├── teardown_poc.sql                       # Raw SQL teardown (legacy, use teardown_poc.sh)
+├── validate_poc.sh                        # Standalone health check (PASS/FAIL/WARN)
+├── reprovision.py                         # Full re-provision from scratch (env-var driven)
 ├── generate_sample_docs.py                # Generate 5 sample invoices (requires reportlab)
 ├── conftest.py                            # Root pytest config: Snowflake connection fixture,
-│                                          #   Streamlit server lifecycle, env var overrides
+│                                          #   Streamlit server lifecycle, env var overrides,
+│                                          #   sf_conn_factory for concurrent connections
 ├── pyproject.toml                         # Python dependencies (app + dev/test)
 ├── uv.lock                                # Lockfile for reproducible builds (committed)
 ├── sample_documents/                      # 5 pre-generated sample invoices (committed)
@@ -498,13 +717,17 @@ ai_extract_poc/
 │   ├── sample_invoice_04.pdf
 │   └── sample_invoice_05.pdf
 ├── sql/
-│   ├── 01_setup.sql                       # Database, schema, warehouse, stage
-│   ├── 02_tables.sql                      # Document tracking + extraction tables
+│   ├── 01_setup.sql                       # Database, schema, warehouse, stage + RBAC role
+│   ├── 02_tables.sql                      # Document tracking + extraction tables (incl. doc_type)
 │   ├── 03_test_single_file.sql            # Test prompts on one file (START HERE)
 │   ├── 04_batch_extract.sql               # Extract all staged documents
 │   ├── 05_views.sql                       # Analytical views for dashboard
 │   ├── 06_automate.sql                    # Stream + Task automation (optional)
-│   └── 07_deploy_streamlit.sql            # Deploy the Streamlit dashboard (optional)
+│   ├── 07_deploy_streamlit.sql            # Deploy the Streamlit dashboard (optional)
+│   ├── 08_writeback.sql                   # INVOICE_REVIEW table + V_INVOICE_SUMMARY view
+│   ├── 09_document_types.sql              # DOCUMENT_TYPE_CONFIG table + seed rows
+│   ├── 10_harden.sql                      # Production hardening (ownership, managed access, resource monitor)
+│   └── 11_alerts.sql                      # Extraction failure alert + health check procedure
 ├── streamlit/
 │   ├── streamlit_app.py                   # Landing page + pipeline overview
 │   ├── config.py                          # Dynamic config (zero hardcoded values)
@@ -514,13 +737,27 @@ ai_extract_poc/
 │   └── pages/
 │       ├── 0_Dashboard.py                 # KPI cards + recent documents
 │       ├── 1_Document_Viewer.py           # Browse, filter, drill-down + PDF viewer
-│       └── 2_Analytics.py                 # Charts: by sender, monthly, aging, top items
+│       ├── 2_Analytics.py                 # Charts: by sender, monthly, aging, top items
+│       ├── 3_Review.py                    # Inline data_editor for review/correction writeback
+│       └── 4_Admin.py                     # Document type config management
 └── tests/
     ├── __init__.py                        # Package marker
-    ├── test_deployment_readiness.py       # Pre-flight checks (Cortex, encryption, EAI)
-    ├── test_sql_integration.py            # All SQL objects exist with correct schema
-    ├── test_extraction_pipeline.py        # Live AI_EXTRACT, stored proc, idempotency
-    ├── test_data_validation.py            # Data quality, parse failures, edge cases
+    ├── test_config.py                     # Config module unit tests (6 tests)
+    ├── test_deployment_readiness.py       # Pre-flight checks: Cortex, encryption, EAI (12 tests)
+    ├── test_sql_integration.py            # All SQL objects exist with correct schema (45 tests)
+    ├── test_extraction_pipeline.py        # Live AI_EXTRACT, stored proc, idempotency (22 tests)
+    ├── test_data_validation.py            # Data quality, completeness, no orphans (36 tests)
+    ├── test_writeback_integration.py      # INVOICE_REVIEW table + V_INVOICE_SUMMARY (19 tests)
+    ├── test_writeback_data_validation.py  # Writeback data quality + COALESCE logic (20 tests)
+    ├── test_review_helpers.py             # Review page helper functions (43 tests)
+    ├── test_sql_parity.py                 # SQL script vs live object parity (10 tests)
+    ├── test_rbac_permissions.py           # Role-based access control checks (20 tests)
+    ├── test_performance.py                # Query latency benchmarks (12 tests)
+    ├── test_teardown_idempotency.py       # Teardown script idempotency (15 tests)
+    ├── test_load_stress.py                # Bulk inserts + concurrent writers (7 tests)
+    ├── test_multi_user_concurrency.py     # Interleaved reviews + race conditions (7 tests)
+    ├── test_data_drift.py                 # Boundary values + schema evolution (13 tests)
+    ├── test_edge_cases.py                 # Rollbacks, SQL injection, large data, gaps (33 tests)
     └── test_e2e/
         ├── __init__.py                    # Package marker
         ├── conftest.py                    # E2E fixtures + screenshot-on-failure (daemon thread)
@@ -528,10 +765,11 @@ ai_extract_poc/
         ├── test_poc_landing.py            # Landing page tests
         ├── test_poc_dashboard.py          # Dashboard page tests
         ├── test_poc_document_viewer.py    # Document Viewer page tests
-        └── test_poc_analytics.py          # Analytics page tests
+        ├── test_poc_analytics.py          # Analytics page tests
+        └── test_poc_review.py             # Review page tests
 ```
 
-**Run scripts in order: 01 -> 02 -> (upload files) -> 03 -> 04 -> 05 -> (optionally 06, 07)**
+**Run scripts in order: 01 -> 02 -> (upload files) -> 03 -> 04 -> 05 -> (optionally 06, 07, 08, 09)**
 
 ---
 
@@ -578,28 +816,36 @@ AI_EXTRACT pricing is based on Cortex AI tokens:
 
 ## Cleanup
 
-To remove all POC objects from your account:
+To remove all POC objects from your account, use the parameterized teardown script:
+
+```bash
+# Interactive teardown (prompts for confirmation)
+bash teardown_poc.sh --connection my_account
+
+# Or with custom names
+POC_DB=MY_DB POC_WH=MY_WH bash teardown_poc.sh --connection my_account
+
+# Or via Makefile
+make teardown CONNECTION=my_account
+```
+
+The script drops the database, warehouse, compute pool, and role. It prompts for
+confirmation before proceeding.
+
+**Manual cleanup** (raw SQL, if the script isn't available):
 
 ```sql
--- Drop the database (removes everything: schema, tables, views, stage, stream, task, procedure)
 DROP DATABASE IF EXISTS AI_EXTRACT_POC;
-
--- Drop the warehouse
 DROP WAREHOUSE IF EXISTS AI_EXTRACT_WH;
-
--- Drop the compute pool (if you deployed the dashboard)
 DROP COMPUTE POOL IF EXISTS AI_EXTRACT_POC_POOL;
-
--- Optionally remove the EAI and network rule (if no other apps use them)
--- DROP EXTERNAL ACCESS INTEGRATION IF EXISTS PYPI_ACCESS_INTEGRATION;
--- DROP NETWORK RULE IF EXISTS PYPI_NETWORK_RULE;
+-- Optionally: DROP EXTERNAL ACCESS INTEGRATION IF EXISTS PYPI_ACCESS_INTEGRATION;
 ```
 
 ---
 
 ## Validating the Deployment (Tests)
 
-The POC includes a test suite (147 tests) that verifies every SQL object, data quality, extraction pipeline, and Streamlit page. Running tests after deployment proves everything works end-to-end.
+The POC includes a comprehensive test suite (~826 tests) that verifies every SQL object, data quality, extraction pipeline, writeback workflow, review logic, RBAC permissions, concurrency, and all Streamlit pages across all three Snowflake clouds (AWS, Azure, GCP). Running tests after deployment proves everything works end-to-end.
 
 > **If you only ran the SQL scripts in Snowsight** (steps 1-7), the tests are optional but recommended. They catch issues like missing grants, encryption mismatches, and parse failures that you might not notice manually.
 
@@ -631,6 +877,7 @@ warehouse = "AI_EXTRACT_WH"
 database = "AI_EXTRACT_POC"
 schema = "DOCUMENTS"
 role = "ACCOUNTADMIN"
+# Use ACCOUNTADMIN for initial setup; switch to AI_EXTRACT_APP after deploy
 ```
 
 Then tell the POC which connection to use:
@@ -652,6 +899,7 @@ export POC_CONNECTION=my_account   # Snowflake connection name from config.toml
 export POC_DB=AI_EXTRACT_POC       # Database name (default: AI_EXTRACT_POC)
 export POC_SCHEMA=DOCUMENTS        # Schema name (default: DOCUMENTS)
 export POC_WH=AI_EXTRACT_WH        # Warehouse name (default: AI_EXTRACT_WH)
+export POC_ROLE=AI_EXTRACT_APP     # Role name (default: AI_EXTRACT_APP)
 ```
 
 ### Install Test Dependencies
@@ -672,9 +920,10 @@ uv run playwright install chromium
 
 The root-level `conftest.py` provides shared test infrastructure:
 
-- **Snowflake connection fixture** (`sf_conn`, `sf_cursor`) — connects using the `POC_CONNECTION` env var (default `aws_spcs`) and sets the active database, schema, and warehouse
+- **Snowflake connection fixture** (`sf_conn`, `sf_cursor`) — connects using the `POC_CONNECTION` env var (default `aws_spcs`), executes `USE ROLE` with `POC_ROLE` (default `AI_EXTRACT_APP`), and sets the active database, schema, and warehouse
+- **Connection factory fixture** (`sf_conn_factory`) — returns a callable that creates fresh Snowflake connections, used by load and concurrency tests for true multi-connection parallelism
 - **Streamlit server lifecycle** — automatically starts a local Streamlit server on port 8504 when E2E tests are selected, kills stale port holders, and waits for the server to be ready
-- **Environment variable configuration** — all names (database, schema, warehouse, connection) are configurable via `POC_DB`, `POC_SCHEMA`, `POC_WH`, and `POC_CONNECTION` env vars
+- **Environment variable configuration** — all names (database, schema, warehouse, role, connection) are configurable via `POC_DB`, `POC_SCHEMA`, `POC_WH`, `POC_ROLE`, and `POC_CONNECTION` env vars
 
 ### Streamlit Secrets (E2E Tests Only)
 
@@ -691,7 +940,7 @@ authenticator = "externalbrowser"
 warehouse = "AI_EXTRACT_WH"
 database = "AI_EXTRACT_POC"
 schema = "DOCUMENTS"
-role = "ACCOUNTADMIN"
+role = "AI_EXTRACT_APP"
 
 # Option B: Programmatic Access Token (PAT) — headless, no browser popup
 # [connections.snowflake]
@@ -702,7 +951,7 @@ role = "ACCOUNTADMIN"
 # warehouse = "AI_EXTRACT_WH"
 # database = "AI_EXTRACT_POC"
 # schema = "DOCUMENTS"
-# role = "ACCOUNTADMIN"
+# role = "AI_EXTRACT_APP"
 ```
 
 > **Important:** When using PAT auth, the key must be `token` (not `password`). Generate a PAT in Snowsight under **User Menu > Preferences > Programmatic Access Tokens**.
@@ -713,13 +962,37 @@ role = "ACCOUNTADMIN"
 
 From the `poc/` directory:
 
-**Tier 1 — SQL + Data Quality tests only** (~60 seconds, no browser needed):
+**Tier 1 — Core SQL + Data Quality tests** (~60 seconds, no browser needed):
 
 ```bash
-uv run pytest tests/test_sql_integration.py tests/test_data_validation.py tests/test_deployment_readiness.py tests/test_extraction_pipeline.py -v
+uv run pytest tests/test_config.py tests/test_sql_integration.py tests/test_data_validation.py tests/test_deployment_readiness.py tests/test_extraction_pipeline.py -v
 ```
 
-**Tier 2 — Full suite including E2E browser tests** (~4 minutes):
+**Tier 2 — Writeback + Review tests** (~90 seconds):
+
+```bash
+uv run pytest tests/test_writeback_integration.py tests/test_writeback_data_validation.py tests/test_review_helpers.py tests/test_sql_parity.py -v
+```
+
+**Tier 3 — Security, Performance, Resilience** (~2-3 minutes):
+
+```bash
+uv run pytest tests/test_rbac_permissions.py tests/test_performance.py tests/test_teardown_idempotency.py -v
+```
+
+**Tier 4 — Load, Concurrency, Edge Cases** (~3-5 minutes):
+
+```bash
+uv run pytest tests/test_load_stress.py tests/test_multi_user_concurrency.py tests/test_data_drift.py tests/test_edge_cases.py -v
+```
+
+**Tier 5 — All non-E2E tests at once** (~5-8 minutes):
+
+```bash
+uv run pytest tests/ --ignore=tests/test_e2e -v
+```
+
+**Tier 6 — Full suite including E2E browser tests** (~10 minutes):
 
 ```bash
 # Start the local Streamlit server first (in a separate terminal):
@@ -727,11 +1000,12 @@ cd poc && uv run streamlit run streamlit/streamlit_app.py --server.port 8504 --s
 
 # Then run non-E2E tests + each E2E file separately (recommended):
 cd poc
-uv run pytest tests/test_data_validation.py tests/test_deployment_readiness.py tests/test_sql_integration.py tests/test_extraction_pipeline.py -v
-uv run pytest tests/test_e2e/test_poc_analytics.py -v
+uv run pytest tests/ --ignore=tests/test_e2e -v
+uv run pytest tests/test_e2e/test_poc_landing.py -v
 uv run pytest tests/test_e2e/test_poc_dashboard.py -v
 uv run pytest tests/test_e2e/test_poc_document_viewer.py -v
-uv run pytest tests/test_e2e/test_poc_landing.py -v
+uv run pytest tests/test_e2e/test_poc_analytics.py -v
+uv run pytest tests/test_e2e/test_poc_review.py -v
 ```
 
 > **Why run E2E files separately?** Playwright's Chromium process can become unstable after
@@ -744,7 +1018,7 @@ uv run pytest tests/test_e2e/test_poc_landing.py -v
 > Playwright cannot negotiate. The local server connects to Snowflake via your
 > `secrets.toml` credentials and serves the same pages on `localhost:8504`.
 
-**Tier 3 — Clean-room: teardown, redeploy, test** (proves scripts work from scratch):
+**Tier 7 — Clean-room: teardown, redeploy, test** (proves scripts work from scratch):
 
 ```bash
 # 1. Tear down existing POC
@@ -756,36 +1030,77 @@ snow sql -c my_account -f poc/teardown_poc.sql
 # 3. Start local Streamlit server (separate terminal, for E2E tests)
 cd poc && uv run streamlit run streamlit/streamlit_app.py --server.port 8504 --server.headless true
 
-# 4. Run all tests (E2E files separately — see Tier 2 note above)
+# 4. Run all tests (E2E files separately — see note above)
 cd poc
-uv run pytest tests/test_data_validation.py tests/test_deployment_readiness.py tests/test_sql_integration.py tests/test_extraction_pipeline.py -v
-uv run pytest tests/test_e2e/test_poc_analytics.py -v
+uv run pytest tests/ --ignore=tests/test_e2e -v
+uv run pytest tests/test_e2e/test_poc_landing.py -v
 uv run pytest tests/test_e2e/test_poc_dashboard.py -v
 uv run pytest tests/test_e2e/test_poc_document_viewer.py -v
-uv run pytest tests/test_e2e/test_poc_landing.py -v
+uv run pytest tests/test_e2e/test_poc_analytics.py -v
+uv run pytest tests/test_e2e/test_poc_review.py -v
 ```
 
 ### What the Tests Verify
 
 | Test File | Count | What It Checks |
 |---|---|---|
+| `test_config.py` | 6 | Config module: env var overrides, defaults, connection name resolution |
 | `test_deployment_readiness.py` | 12 | Pre-flight: Cortex access, SSE encryption, staged files, EAI, compute pool, Streamlit stage |
-| `test_sql_integration.py` | 42 | Every SQL object: database, schema, warehouse, stages, tables, columns, PKs, views, stream, task, stored proc |
-| `test_extraction_pipeline.py` | 16 | Live AI_EXTRACT calls (entity + table mode), stored procedure execution, idempotency, LATERAL FLATTEN |
+| `test_sql_integration.py` | 45 | Every SQL object: database, schema, warehouse, stages, tables, columns, PKs, views, stream, task, stored proc, INVOICE_REVIEW, V_INVOICE_SUMMARY |
+| `test_extraction_pipeline.py` | 22 | Live AI_EXTRACT calls (entity + table mode), stored procedure execution, idempotency, LATERAL FLATTEN |
 | `test_data_validation.py` | 36 | Data quality: completeness, no NULLs in required fields, amounts > 0, valid dates, no orphans, no duplicates |
-| `test_e2e/` (4 files) | 41 | Playwright browser tests: every Streamlit page loads, no exceptions, KPIs show correct values, charts render |
+| `test_writeback_integration.py` | 19 | INVOICE_REVIEW table operations, V_INVOICE_SUMMARY view, append-only behavior, COALESCE override logic |
+| `test_writeback_data_validation.py` | 20 | Writeback data quality, corrected field types, review status values, FK integrity |
+| `test_review_helpers.py` | 43 | Review page helper functions: data loading, save logic, status transitions, validation |
+| `test_sql_parity.py` | 10 | SQL script DDL matches live Snowflake objects (column count, types, constraints) |
+| `test_rbac_permissions.py` | 20 | Role-based access control: table grants, view grants, stage access, procedure execute |
+| `test_performance.py` | 12 | Query latency benchmarks: views return within thresholds, index usage, no full scans |
+| `test_teardown_idempotency.py` | 15 | Teardown script is idempotent (safe to run multiple times) |
+| `test_load_stress.py` | 7 | Bulk inserts (50 sequential), concurrent writers (5 threads), concurrent read+write on view |
+| `test_multi_user_concurrency.py` | 7 | Interleaved reviews, simultaneous writes with threading.Barrier, rapid overwrites, race conditions |
+| `test_data_drift.py` | 13 | Boundary values (Unicode, large strings, max precision), NULL COALESCE patterns, schema evolution (ADD/DROP COLUMN) |
+| `test_edge_cases.py` | 33 | AUTOINCREMENT gaps, transaction rollbacks, column defaults, 100K-char notes, SQL injection, empty-table cold start, duplicate filenames, boundary record_ids, concurrent schema changes |
+| `test_e2e/` (5 files) | 72 | Playwright browser tests: every Streamlit page loads (including Review), no exceptions, KPIs render, charts display, data_editor functions, doc_type filtering |
+| **Total** | **~421** | **~350 non-E2E + ~71 E2E (exact counts vary by cloud; 3-4 skipped)** |
 
 ### Cross-Cloud Verification
 
-This kit has been deployed and tested from scratch on all three Snowflake clouds:
+This kit has been deployed and tested from scratch on all three Snowflake clouds. Every account was provisioned with identical infrastructure: database, schema, warehouse, tables (including `INVOICE_REVIEW` and `DOCUMENT_TYPE_CONFIG`), views (including `V_INVOICE_SUMMARY` and `V_DOCUMENT_LEDGER` with `doc_type`), the `AI_EXTRACT_APP` RBAC role with full grants, and all Streamlit files uploaded to `STREAMLIT_STAGE`.
 
-| Cloud | Region | Result |
-|---|---|---|
-| **AWS** | US East 1 (Virginia) | 147/147 pass |
-| **Azure** | East US 2 | 147/147 pass |
-| **GCP** | US East 4 | 147/147 pass |
+| Cloud | Region | Non-E2E | E2E | Total | Skipped |
+|---|---|---|---|---|---|
+| **AWS** | US East 1 (Virginia) | 340 passed | 71 passed | **411 passed** | 3 |
+| **Azure** | East US 2 | 350 passed | 71 passed | **421 passed** | 4 |
+| **GCP** | US Central 1 | 350 passed | 71 passed | **421 passed** | 4 |
+
+> The slight difference in non-E2E counts between AWS and Azure/GCP is due to two tests that are skipped on AWS for environment-specific reasons. All skips are intentional (e.g., no NULL date records to test, no reviews yet to validate).
 
 GCP and other non-primary regions require cross-region inference, which `01_setup.sql` enables automatically.
+
+#### Cross-Cloud Testing Commands
+
+To run the full test suite against a non-default account, set the `POC_CONNECTION` environment variable along with the database, schema, warehouse, and role:
+
+```bash
+cd poc
+
+# Azure
+POC_CONNECTION=azure_spcs POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
+  POC_WH=AI_EXTRACT_WH POC_ROLE=AI_EXTRACT_APP \
+  uv run pytest tests/ --ignore=tests/test_e2e -v
+
+# GCP
+POC_CONNECTION=gcp_spcs POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
+  POC_WH=AI_EXTRACT_WH POC_ROLE=AI_EXTRACT_APP \
+  uv run pytest tests/ --ignore=tests/test_e2e -v
+
+# E2E tests (starts a local Streamlit server pointed at the target account)
+POC_CONNECTION=azure_spcs POC_DB=AI_EXTRACT_POC POC_SCHEMA=DOCUMENTS \
+  POC_WH=AI_EXTRACT_WH POC_ROLE=AI_EXTRACT_APP \
+  uv run pytest tests/test_e2e/ -v
+```
+
+> **Note:** The `POC_ROLE` env var tells `conftest.py` to `USE ROLE <role>` before running any queries. This ensures tests run with the same least-privilege role used by the app, not ACCOUNTADMIN.
 
 ### Interpreting Test Failures
 

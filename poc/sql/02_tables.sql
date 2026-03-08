@@ -6,10 +6,13 @@
 --   2. Entity extraction results (header-level fields from each document)
 --   3. Table extraction results (line items / tabular data from each document)
 --
--- CUSTOMIZE: Rename columns in EXTRACTED_FIELDS and EXTRACTED_TABLE_DATA
--- to match YOUR document type. See comments for examples.
+-- The fixed columns (field_1..field_10, col_1..col_5) provide backward
+-- compatibility. The VARIANT columns (raw_extraction, raw_line_data) store
+-- the full AI_EXTRACT JSON response so any document type with any number
+-- of fields works without schema changes.
 -- =============================================================================
 
+USE ROLE AI_EXTRACT_APP;          -- <-- match your 01_setup.sql role
 USE DATABASE AI_EXTRACT_POC;      -- <-- match your 01_setup.sql values
 USE SCHEMA DOCUMENTS;
 USE WAREHOUSE AI_EXTRACT_WH;
@@ -20,6 +23,7 @@ USE WAREHOUSE AI_EXTRACT_WH;
 CREATE TABLE IF NOT EXISTS RAW_DOCUMENTS (
     file_name         VARCHAR NOT NULL,
     file_path         VARCHAR NOT NULL,
+    doc_type          VARCHAR DEFAULT 'INVOICE',   -- INVOICE | CONTRACT | RECEIPT | custom
     staged_at         TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     extracted         BOOLEAN DEFAULT FALSE,
     extracted_at      TIMESTAMP_NTZ,
@@ -30,27 +34,20 @@ CREATE TABLE IF NOT EXISTS RAW_DOCUMENTS (
 -- ---------------------------------------------------------------------------
 -- EXTRACTED_FIELDS: Entity-level data pulled from each document
 -- ---------------------------------------------------------------------------
+-- Fixed columns (field_1..field_10) are populated for the first 10 fields.
+-- raw_extraction stores the FULL AI_EXTRACT JSON response — any number of
+-- fields, any types. New document types with >10 fields use raw_extraction.
 -- ┌─────────────────────────────────────────────────────────────────────────┐
--- │  CUSTOMIZE THESE COLUMNS for your document type.                       │
--- │                                                                        │
--- │  Invoice example (default):                                            │
--- │    vendor_name, invoice_number, invoice_date, due_date, total_amount   │
--- │                                                                        │
--- │  Contract example:                                                     │
--- │    party_a, party_b, effective_date, expiration_date, contract_value   │
--- │                                                                        │
--- │  Receipt example:                                                      │
--- │    store_name, receipt_number, transaction_date, total, payment_method │
--- │                                                                        │
--- │  Medical claim example:                                                │
--- │    patient_name, provider, service_date, diagnosis_code, billed_amount│
+-- │  For new document types, you do NOT need to add columns here.          │
+-- │  Just configure DOCUMENT_TYPE_CONFIG and the extraction prompt.        │
+-- │  The full response is stored in raw_extraction as VARIANT/JSON.        │
 -- └─────────────────────────────────────────────────────────────────────────┘
 
 CREATE TABLE IF NOT EXISTS EXTRACTED_FIELDS (
     record_id         NUMBER AUTOINCREMENT PRIMARY KEY,
     file_name         VARCHAR NOT NULL,
 
-    -- Document header fields — RENAME THESE to match your document type
+    -- Fixed columns for backward compatibility (first 10 fields)
     field_1           VARCHAR,       -- e.g., vendor_name / party_a / store_name
     field_2           VARCHAR,       -- e.g., invoice_number / contract_id / receipt_number
     field_3           VARCHAR,       -- e.g., po_number / reference_number
@@ -62,6 +59,9 @@ CREATE TABLE IF NOT EXISTS EXTRACTED_FIELDS (
     field_9           NUMBER(12,2),  -- e.g., tax_amount / discount
     field_10          NUMBER(12,2),  -- e.g., total_amount / contract_value
 
+    -- Full AI_EXTRACT response as JSON — supports any number of fields
+    raw_extraction    VARIANT,       -- e.g., {"vendor_name":"Acme","total":1500.00,...}
+
     -- Metadata
     status            VARCHAR DEFAULT 'EXTRACTED',
     extracted_at      TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
@@ -72,17 +72,12 @@ CREATE TABLE IF NOT EXISTS EXTRACTED_FIELDS (
 -- ---------------------------------------------------------------------------
 -- EXTRACTED_TABLE_DATA: Line items / tabular data from each document
 -- ---------------------------------------------------------------------------
+-- Fixed columns (col_1..col_5) handle up to 5 table columns.
+-- raw_line_data stores the full line item as JSON for flexible schemas.
 -- ┌─────────────────────────────────────────────────────────────────────────┐
--- │  CUSTOMIZE THESE COLUMNS for the tables inside your documents.         │
--- │                                                                        │
--- │  Invoice line items (default):                                         │
--- │    product_name, category, quantity, unit_price, line_total            │
--- │                                                                        │
--- │  Contract schedule of payments:                                        │
--- │    milestone, due_date, amount, status                                 │
--- │                                                                        │
--- │  Medical claim line items:                                             │
--- │    procedure_code, description, quantity, charge, allowed_amount       │
+-- │  For new document types, you do NOT need to add columns here.          │
+-- │  Configure table_extraction_schema in DOCUMENT_TYPE_CONFIG instead.    │
+-- │  The full line-item data is stored in raw_line_data as VARIANT/JSON.   │
 -- └─────────────────────────────────────────────────────────────────────────┘
 
 CREATE TABLE IF NOT EXISTS EXTRACTED_TABLE_DATA (
@@ -91,12 +86,15 @@ CREATE TABLE IF NOT EXISTS EXTRACTED_TABLE_DATA (
     record_id         VARCHAR,       -- Links to parent document (e.g., invoice_number)
     line_number       NUMBER,
 
-    -- Table columns — RENAME THESE to match your document's tabular data
+    -- Fixed columns for backward compatibility (first 5 table columns)
     col_1             VARCHAR,       -- e.g., product_name / procedure_code / milestone
     col_2             VARCHAR,       -- e.g., category / description
     col_3             NUMBER(10,2),  -- e.g., quantity
     col_4             NUMBER(10,2),  -- e.g., unit_price / charge
     col_5             NUMBER(12,2),  -- e.g., line_total / amount
+
+    -- Full line item as JSON — supports any number of table columns
+    raw_line_data     VARIANT,       -- e.g., {"description":"Widget","qty":5,"total":50.00}
 
     CONSTRAINT fk_table_raw FOREIGN KEY (file_name) REFERENCES RAW_DOCUMENTS(file_name)
 );
@@ -107,10 +105,11 @@ CREATE TABLE IF NOT EXISTS EXTRACTED_TABLE_DATA (
 -- Run this AFTER uploading your documents to the stage.
 -- Safe to re-run — skips files already registered.
 
-INSERT INTO RAW_DOCUMENTS (file_name, file_path, staged_at, extracted)
+INSERT INTO RAW_DOCUMENTS (file_name, file_path, doc_type, staged_at, extracted)
 SELECT
     RELATIVE_PATH                              AS file_name,
     '@DOCUMENT_STAGE/' || RELATIVE_PATH        AS file_path,
+    'INVOICE'                                  AS doc_type,   -- <-- change per document type
     CURRENT_TIMESTAMP()                        AS staged_at,
     FALSE                                      AS extracted
 FROM DIRECTORY(@DOCUMENT_STAGE)
