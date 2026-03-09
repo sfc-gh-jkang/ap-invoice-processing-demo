@@ -76,17 +76,20 @@ jobs:
         include:
           - cloud: aws
             account_secret: SNOWFLAKE_ACCOUNT_AWS
+            token_secret: SNOWFLAKE_TOKEN_AWS
           - cloud: azure
             account_secret: SNOWFLAKE_ACCOUNT_AZURE
+            token_secret: SNOWFLAKE_TOKEN_AZURE
           - cloud: gcp
             account_secret: SNOWFLAKE_ACCOUNT_GCP
+            token_secret: SNOWFLAKE_TOKEN_GCP
     defaults:
       run:
         working-directory: poc
     env:
       SNOWFLAKE_ACCOUNT: ${{ secrets[matrix.account_secret] }}
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_TOKEN: ${{ secrets[matrix.token_secret] }}
       POC_CONNECTION: ci
     steps:
       - uses: actions/checkout@v4
@@ -94,7 +97,7 @@ jobs:
       - name: Check Snowflake secrets are configured
         id: check_secrets
         run: |
-          if [ -z "$SNOWFLAKE_ACCOUNT" ] || [ -z "$SNOWFLAKE_USER" ] || [ -z "$SNOWFLAKE_PASSWORD" ]; then
+          if [ -z "$SNOWFLAKE_ACCOUNT" ] || [ -z "$SNOWFLAKE_USER" ] || [ -z "$SNOWFLAKE_TOKEN" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::warning::Snowflake secrets not configured for ${{ matrix.cloud }} — skipping"
           else
@@ -121,7 +124,8 @@ jobs:
           [ci]
           account = "${SNOWFLAKE_ACCOUNT}"
           user = "${SNOWFLAKE_USER}"
-          password = "${SNOWFLAKE_PASSWORD}"
+          authenticator = "programmatic_access_token"
+          token = "${SNOWFLAKE_TOKEN}"
           database = "${POC_DB}"
           schema = "${POC_SCHEMA}"
           warehouse = "${POC_WH}"
@@ -160,17 +164,20 @@ jobs:
         include:
           - cloud: aws
             account_secret: SNOWFLAKE_ACCOUNT_AWS
+            token_secret: SNOWFLAKE_TOKEN_AWS
           - cloud: azure
             account_secret: SNOWFLAKE_ACCOUNT_AZURE
+            token_secret: SNOWFLAKE_TOKEN_AZURE
           - cloud: gcp
             account_secret: SNOWFLAKE_ACCOUNT_GCP
+            token_secret: SNOWFLAKE_TOKEN_GCP
     defaults:
       run:
         working-directory: poc
     env:
       SNOWFLAKE_ACCOUNT: ${{ secrets[matrix.account_secret] }}
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_TOKEN: ${{ secrets[matrix.token_secret] }}
       POC_CONNECTION: ci
     steps:
       - uses: actions/checkout@v4
@@ -178,7 +185,7 @@ jobs:
       - name: Check Snowflake secrets are configured
         id: check_secrets
         run: |
-          if [ -z "$SNOWFLAKE_ACCOUNT" ] || [ -z "$SNOWFLAKE_USER" ] || [ -z "$SNOWFLAKE_PASSWORD" ]; then
+          if [ -z "$SNOWFLAKE_ACCOUNT" ] || [ -z "$SNOWFLAKE_USER" ] || [ -z "$SNOWFLAKE_TOKEN" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::warning::Snowflake secrets not configured for ${{ matrix.cloud }} — skipping"
           else
@@ -209,7 +216,8 @@ jobs:
           [ci]
           account = "${SNOWFLAKE_ACCOUNT}"
           user = "${SNOWFLAKE_USER}"
-          password = "${SNOWFLAKE_PASSWORD}"
+          authenticator = "programmatic_access_token"
+          token = "${SNOWFLAKE_TOKEN}"
           database = "${POC_DB}"
           schema = "${POC_SCHEMA}"
           warehouse = "${POC_WH}"
@@ -225,7 +233,8 @@ jobs:
           [connections.snowflake]
           account = "${SNOWFLAKE_ACCOUNT}"
           user = "${SNOWFLAKE_USER}"
-          password = "${SNOWFLAKE_PASSWORD}"
+          authenticator = "programmatic_access_token"
+          token = "${SNOWFLAKE_TOKEN}"
           warehouse = "${POC_WH}"
           database = "${POC_DB}"
           schema = "${POC_SCHEMA}"
