@@ -37,6 +37,8 @@ This kit walks you through a complete proof-of-concept:
 - [Validating the Deployment (Tests)](#validating-the-deployment-tests)
 - [Using Your Own Documents](#using-your-own-documents)
 - [Next Steps](#next-steps)
+- [Building a Production PDF Extraction Pipeline](#building-a-production-pdf-extraction-pipeline)
+- [Customer Handoff Checklist](#customer-handoff-checklist)
 
 ---
 
@@ -1482,6 +1484,355 @@ After a successful POC:
 4. **Automate** — Enable the Stream + Task pipeline from `06_automate.sql`
 5. **Integrate** — Connect extraction output to your ERP, AP system, or data warehouse via Snowflake data sharing, Snowpipe, or direct table access
 6. **Explore the reference demo** — A full-featured invoice processing app with generated test data, additional analytics, and E2E tests (see the root `README.md` in this repository)
+
+---
+
+## Building a Production PDF Extraction Pipeline
+
+This section provides a comprehensive, step-by-step guide for building a fully end-to-end document extraction pipeline on Snowflake — from raw PDFs landing in cloud storage through structured, validated, human-reviewed data ready for downstream consumption.
+
+### Architecture Overview
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        SNOWFLAKE ACCOUNT                                │
+│                                                                         │
+│  ┌─────────────┐    ┌───────────────┐    ┌────────────────────────────┐ │
+│  │ Cloud Storage│    │  Internal     │    │  AI_EXTRACT (Cortex)       │ │
+│  │ (S3/Azure/  │───►│  Stage        │───►│  Entity + Table extraction │ │
+│  │  GCS)       │    │  (SSE enc.)   │    └────────────┬───────────────┘ │
+│  └─────────────┘    └───────────────┘                 │                 │
+│        │                    │                          ▼                 │
+│        │             ┌──────┴──────┐    ┌────────────────────────────┐  │
+│        │             │ RAW_DOCUMENTS│    │  EXTRACTED_FIELDS          │  │
+│        │             │ (file        │    │  EXTRACTED_TABLE_DATA      │  │
+│        │             │  registry)   │    │  (structured output)       │  │
+│        │             └──────┬──────┘    └────────────┬───────────────┘  │
+│        │                    │                         │                  │
+│  ┌─────┴─────┐       ┌─────┴──────┐    ┌────────────┴───────────────┐  │
+│  │ Snowpipe / │       │  Stream    │    │  Analytical Views          │  │
+│  │ Auto-ingest│       │  + Task    │    │  (V_DOCUMENT_LEDGER,       │  │
+│  │ (optional) │       │  (5-min)   │    │   V_SUMMARY_BY_VENDOR,     │  │
+│  └────────────┘       └────────────┘    │   V_EXTRACTION_STATUS)     │  │
+│                                         └────────────┬───────────────┘  │
+│                                                      │                  │
+│  ┌────────────────────────────┐    ┌─────────────────┴──────────────┐  │
+│  │  INVOICE_REVIEW            │    │  Streamlit Dashboard           │  │
+│  │  (append-only audit trail) │◄───│  (review, approve, correct)    │  │
+│  └────────────────────────────┘    └────────────────────────────────┘  │
+│                                                      │                  │
+│  ┌────────────────────────────┐    ┌─────────────────┴──────────────┐  │
+│  │  Resource Monitor          │    │  Extraction Failure Alert      │  │
+│  │  (100 credits/month cap)   │    │  (fires on 3+ failures/24h)   │  │
+│  └────────────────────────────┘    └────────────────────────────────┘  │
+│                                                      │                  │
+│                                                      ▼                  │
+│                                    ┌────────────────────────────────┐  │
+│                                    │  Downstream: ERP, AP system,   │  │
+│                                    │  Data Warehouse, Snowflake     │  │
+│                                    │  Data Sharing                  │  │
+│                                    └────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 1: Foundation (Day 1)
+
+**Goal:** Get Snowflake objects created and a single document extracting correctly.
+
+| Step | Script | What It Does |
+|------|--------|-------------|
+| 1.1 | `01_setup.sql` | Creates dedicated role (`AI_EXTRACT_APP`), database, schema, X-SMALL warehouse, and internal stage with **SNOWFLAKE_SSE** encryption (required for AI_EXTRACT). Enables cross-region inference. |
+| 1.2 | `02_tables.sql` | Creates three core tables: `RAW_DOCUMENTS` (file registry), `EXTRACTED_FIELDS` (entity-level data — 10 flexible columns), `EXTRACTED_TABLE_DATA` (line-item data — 5 flexible columns). Both extraction tables include a `raw_extraction` / `raw_line_data` VARIANT column for full fidelity. |
+| 1.3 | Upload docs | Stage 5-20 representative sample documents in `DOCUMENT_STAGE`. Use Snowsight drag-and-drop, `snow stage put`, or the `PUT` command. Script 02 auto-registers them. |
+| 1.4 | `03_test_single_file.sql` | **Interactive exploration** — run `AI_EXTRACT` on a single file, inspect the raw JSON output, and iterate on your prompt until the extraction matches your expectations. This is the most important step. |
+
+**Key decisions at this phase:**
+- What fields do you need? Map them to `field_1`..`field_10` (rename later).
+- Does your document have a line-item table? Define its schema for table extraction.
+- What data types should each field be? (DATE, NUMBER, VARCHAR)
+
+**Validation checkpoint:** Run `03_test_single_file.sql` against 3-5 different documents. If extraction accuracy is below 90%, refine your prompt before proceeding.
+
+### Phase 2: Batch Extraction (Day 1-2)
+
+**Goal:** Extract all staged documents in bulk.
+
+| Step | Script | What It Does |
+|------|--------|-------------|
+| 2.1 | `04_batch_extract.sql` | Processes all unextracted files (`extracted = FALSE`) in a single statement using `LATERAL` subqueries with `AI_EXTRACT`. Inserts into both `EXTRACTED_FIELDS` and `EXTRACTED_TABLE_DATA`. Marks files as extracted. |
+| 2.2 | `05_views.sql` | Creates 6 analytical views: `V_EXTRACTION_STATUS` (pipeline health), `V_DOCUMENT_LEDGER` (enriched document view with aging), `V_SUMMARY_BY_VENDOR`, `V_MONTHLY_TREND`, `V_TOP_LINE_ITEMS`, `V_AGING_SUMMARY`. |
+
+**Key patterns:**
+- The batch script uses `TRY_TO_DATE`, `TRY_TO_NUMBER`, and `REGEXP_REPLACE` to safely parse AI output into typed columns
+- Table extraction uses `LATERAL FLATTEN` on parallel arrays with index-aligned `WHERE` to unnest rows
+- Views use generic `field_N` references — rename them to meaningful names (`vendor_name`, `invoice_date`, etc.) once your schema is stable
+
+**Validation checkpoint:** Query `V_EXTRACTION_STATUS` — you should see `PENDING_FILES = 0` and `FAILED_FILES = 0`. Spot-check 10 documents in `EXTRACTED_FIELDS` against the source PDFs.
+
+### Phase 3: Automation (Day 2-3)
+
+**Goal:** New documents are automatically extracted within 5 minutes of being staged.
+
+| Step | Script | What It Does |
+|------|--------|-------------|
+| 3.1 | `06_automate.sql` | Creates the automation layer: an append-only **Stream** on `RAW_DOCUMENTS`, a **Stored Procedure** (`SP_EXTRACT_NEW_DOCUMENTS`) that wraps the batch logic, and a **Task** that fires every 5 minutes when the stream has new data. Also creates `SP_EXTRACT_BY_DOC_TYPE` — a Python SP that reads prompts from config and supports any document type. |
+
+**How the automated pipeline works:**
+
+```
+New PDF uploaded to stage
+        │
+        ▼
+INSERT INTO RAW_DOCUMENTS  ──►  Stream detects new row
+        │                              │
+        ▼                              ▼
+  File registered              Task fires (5-min schedule)
+                                       │
+                                       ▼
+                              SP_EXTRACT_NEW_DOCUMENTS()
+                                       │
+                                       ▼
+                              AI_EXTRACT on each new file
+                                       │
+                                       ▼
+                              INSERT into EXTRACTED_FIELDS
+                              INSERT into EXTRACTED_TABLE_DATA
+                              UPDATE RAW_DOCUMENTS SET extracted = TRUE
+```
+
+**To onboard new documents after automation is live:**
+
+```sql
+-- 1. Upload
+PUT file:///path/to/new_doc.pdf @DOCUMENT_STAGE AUTO_COMPRESS=FALSE;
+
+-- 2. Refresh stage directory
+ALTER STAGE DOCUMENT_STAGE REFRESH;
+
+-- 3. Register (idempotent — skips duplicates)
+INSERT INTO RAW_DOCUMENTS (file_name, file_path, staged_at)
+SELECT RELATIVE_PATH, '@DOCUMENT_STAGE/' || RELATIVE_PATH, CURRENT_TIMESTAMP()
+FROM DIRECTORY(@DOCUMENT_STAGE) d
+WHERE NOT EXISTS (SELECT 1 FROM RAW_DOCUMENTS r WHERE r.file_name = d.RELATIVE_PATH);
+
+-- 4. Wait for task (max 5 min) or trigger immediately:
+EXECUTE TASK EXTRACT_NEW_DOCUMENTS_TASK;
+```
+
+**Validation checkpoint:** Upload a new test document, wait 5 minutes, then check `V_EXTRACTION_STATUS` — `PENDING_FILES` should return to 0.
+
+### Phase 4: Multi-Document Types (Day 3-4)
+
+**Goal:** Extract different document types (invoices, contracts, receipts, utility bills) with type-specific prompts and validation.
+
+| Step | Script | What It Does |
+|------|--------|-------------|
+| 4.1 | `09_document_types.sql` | Creates `DOCUMENT_TYPE_CONFIG` table with per-type configuration: extraction prompts, field labels, table extraction schemas, review field definitions, and validation rules. Seeds 4 types: INVOICE, CONTRACT, RECEIPT, UTILITY_BILL. |
+| 4.2 | Use `SP_EXTRACT_BY_DOC_TYPE` | Call `CALL SP_EXTRACT_BY_DOC_TYPE('INVOICE')` to extract all documents of a given type using its configured prompt. |
+
+**Adding a new document type:**
+
+```sql
+-- Insert config for your new type
+INSERT INTO DOCUMENT_TYPE_CONFIG (doc_type, extraction_prompt, field_labels, active)
+VALUES (
+    'MEDICAL_CLAIM',
+    '{
+        "patient_name": "Full name of the patient",
+        "provider_name": "Name of the healthcare provider",
+        "claim_date": "Date of service in YYYY-MM-DD format",
+        "diagnosis_code": "ICD-10 diagnosis code",
+        "total_billed": "Total amount billed as a number only",
+        "insurance_paid": "Amount paid by insurance as a number only",
+        "patient_responsibility": "Amount owed by patient as a number only"
+    }',
+    '{"field_1":"patient_name","field_2":"provider_name","field_3":"claim_date",
+      "field_4":"diagnosis_code","field_5":"total_billed","field_6":"insurance_paid",
+      "field_7":"patient_responsibility"}',
+    TRUE
+);
+
+-- Tag your documents
+UPDATE RAW_DOCUMENTS SET doc_type = 'MEDICAL_CLAIM'
+WHERE file_name ILIKE '%claim%';
+
+-- Extract
+CALL SP_EXTRACT_BY_DOC_TYPE('MEDICAL_CLAIM');
+```
+
+**Validation rules** in `DOC_TYPE_CONFIG.VALIDATION_RULES` support:
+- `type`: DATE, NUMBER, VARCHAR
+- `required`: true/false
+- `min` / `max`: numeric range bounds
+- `pattern`: regex pattern (e.g., `"^INV-\\d+"` for invoice numbers)
+- `date_range_days`: maximum age in days
+
+### Phase 5: Human Review & Corrections (Day 4-5)
+
+**Goal:** Humans can review, approve, reject, or correct extracted data through a Streamlit UI.
+
+| Step | Script | What It Does |
+|------|--------|-------------|
+| 5.1 | `08_writeback.sql` | Creates `INVOICE_REVIEW` table (append-only audit trail — never UPDATE/DELETE, only INSERT). Creates `V_DOCUMENT_SUMMARY` view that joins extraction data with the latest review per document using `ROW_NUMBER()`. |
+| 5.2 | Deploy Streamlit | The Review page provides inline `st.data_editor` editing with writeback to Snowflake. |
+
+**How the review workflow works:**
+
+```
+Extracted data appears in Streamlit "Review" page
+        │
+        ▼
+Reviewer edits fields inline (data_editor)
+        │
+        ▼
+Click "Save" → INSERT INTO INVOICE_REVIEW
+(original values + corrections + reviewer + timestamp)
+        │
+        ▼
+V_DOCUMENT_SUMMARY automatically shows corrected values
+(COALESCE: correction > original)
+        │
+        ▼
+Downstream consumers read V_DOCUMENT_SUMMARY
+(always get best-known values)
+```
+
+**Key design decisions:**
+- **Append-only:** Every review is an INSERT, creating a full audit trail. The view picks the latest review per document via `ROW_NUMBER()`.
+- **Corrections stored as VARIANT:** The `corrections` column stores a JSON object of changed fields, supporting any document type without schema changes.
+- **Three-tier COALESCE:** View prefers VARIANT correction → legacy correction → original extraction value.
+
+### Phase 6: Dashboard & Deployment (Day 5-6)
+
+**Goal:** Deploy a production Streamlit dashboard accessible via Snowsight.
+
+| Step | Script | What It Does |
+|------|--------|-------------|
+| 6.1 | `07_deploy_streamlit.sql` | Creates compute pool, external access integration (for pip), and the Streamlit app on Container Runtime. |
+
+**The dashboard includes 5 pages:**
+
+| Page | Purpose |
+|------|---------|
+| **Landing** | Pipeline status KPIs, extraction summary, architecture diagram |
+| **Document Viewer** | Browse documents, view extracted fields alongside rendered PDF, filter by type/date |
+| **Analytics** | Charts by vendor, time period, line items, aging buckets |
+| **Review** | Inline editing with `st.data_editor`, approve/reject workflow, audit trail |
+| **Admin** | Document type configuration, field mappings, validation rules |
+
+**Deployment options:**
+
+| Method | Best For | How |
+|--------|----------|-----|
+| **SiS (Streamlit in Snowflake)** | Most use cases | `07_deploy_streamlit.sql` or `snow streamlit deploy` |
+| **Local Streamlit** | Development and testing | `streamlit run streamlit/streamlit_app.py` |
+| **SPCS (Container Services)** | Custom containers, GPU | Only if you need packages not available via pip |
+
+### Phase 7: Production Hardening (Day 6-7)
+
+**Goal:** Lock down security, set cost guardrails, and enable monitoring.
+
+| Step | Script | What It Does |
+|------|--------|-------------|
+| 7.1 | `10_harden.sql` | Transfers ownership to `SYSADMIN`, enables managed access, revokes `PUBLIC` grants, removes broad account privileges from the POC role, sets up future grants. |
+| 7.2 | `11_alerts.sql` | Creates `EXTRACTION_FAILURE_ALERT` that fires when 3+ extractions fail in 24 hours. Logs to `EXTRACTION_ALERT_HISTORY`. Creates `V_EXTRACTION_HEALTH` view and `SP_CHECK_EXTRACTION_HEALTH()` for on-demand monitoring. |
+
+**Security hardening checklist:**
+
+- [ ] Run `10_harden.sql` to lock down privileges
+- [ ] Resource monitor is set (100 credits/month default — adjust for your workload)
+- [ ] `AI_EXTRACT_APP` role has minimum necessary privileges (no `CREATE DATABASE`, no `CREATE WAREHOUSE`)
+- [ ] All access to data goes through `AI_EXTRACT_APP` role, not `ACCOUNTADMIN`
+- [ ] Stage uses `SNOWFLAKE_SSE` encryption (verified by script 01)
+- [ ] Network rule limits egress to `pypi.org` only (for Streamlit pip installs)
+
+**Cost controls:**
+
+| Control | Where | Default |
+|---------|-------|---------|
+| Resource monitor | `10_harden.sql` | 100 credits/month, suspend at 100% |
+| Warehouse auto-suspend | `01_setup.sql` | 120 seconds |
+| Warehouse size | `01_setup.sql` | X-SMALL (larger sizes don't improve AI_EXTRACT performance) |
+| Task frequency | `06_automate.sql` | Every 5 minutes (adjustable) |
+| Compute pool auto-suspend | `07_deploy_streamlit.sql` | 300 seconds |
+
+### Phase 8: Integration & Scaling
+
+**Goal:** Connect extraction output to downstream systems and handle high volumes.
+
+**Option A — Snowflake Data Sharing:**
+```sql
+-- Share extracted data with another Snowflake account
+CREATE SHARE AI_EXTRACT_SHARE;
+GRANT USAGE ON DATABASE AI_EXTRACT_POC TO SHARE AI_EXTRACT_SHARE;
+GRANT USAGE ON SCHEMA DOCUMENTS TO SHARE AI_EXTRACT_SHARE;
+GRANT SELECT ON VIEW V_DOCUMENT_SUMMARY TO SHARE AI_EXTRACT_SHARE;
+```
+
+**Option B — External table / Snowpipe for auto-ingest:**
+```sql
+-- Auto-ingest from S3 (replaces manual PUT + REFRESH)
+CREATE PIPE DOCUMENT_PIPE AUTO_INGEST = TRUE AS
+    COPY INTO RAW_DOCUMENTS (file_name, file_path, staged_at)
+    FROM (
+        SELECT
+            METADATA$FILENAME,
+            '@DOCUMENT_STAGE/' || METADATA$FILENAME,
+            CURRENT_TIMESTAMP()
+        FROM @DOCUMENT_STAGE
+    );
+```
+
+**Option C — Direct query from downstream:**
+```sql
+-- Any Snowflake user/role with access can query the views
+SELECT * FROM AI_EXTRACT_POC.DOCUMENTS.V_DOCUMENT_SUMMARY
+WHERE doc_type = 'INVOICE' AND review_status = 'APPROVED';
+```
+
+**Scaling considerations:**
+
+| Volume | Approach | Notes |
+|--------|----------|-------|
+| < 100 docs/day | Default setup | X-SMALL WH, 5-min task |
+| 100-1,000 docs/day | Increase task frequency | `ALTER TASK ... SET SCHEDULE = '1 MINUTE'` |
+| 1,000-10,000 docs/day | Batch with larger windows | Process in hourly batches to reduce task overhead |
+| 10,000+ docs/day | Parallel extraction | Split by doc_type, run multiple SPs concurrently |
+
+### Complete Script Execution Order
+
+For a full deployment from scratch:
+
+```
+01_setup.sql          ← ACCOUNTADMIN (creates role, DB, WH, stage)
+        │
+02_tables.sql         ← AI_EXTRACT_APP (creates tables, registers files)
+        │
+   [Upload PDFs]      ← Stage your documents
+        │
+03_test_single_file   ← AI_EXTRACT_APP (interactive — tune prompts)
+        │
+04_batch_extract.sql  ← AI_EXTRACT_APP (bulk extraction)
+        │
+05_views.sql          ← AI_EXTRACT_APP (analytical views)
+        │
+06_automate.sql       ← AI_EXTRACT_APP (stream + task + SPs)
+        │
+07_deploy_streamlit   ← ACCOUNTADMIN (compute pool, Streamlit app)
+        │
+08_writeback.sql      ← AI_EXTRACT_APP (review table + summary views)
+        │
+09_document_types.sql ← AI_EXTRACT_APP (doc type config + seed data)
+        │
+10_harden.sql         ← ACCOUNTADMIN (lock down, resource monitor)
+        │
+11_alerts.sql         ← AI_EXTRACT_APP (failure monitoring)
+```
+
+Or use the automated deploy script:
+```bash
+POC_DB=MY_DB POC_WH=MY_WH ./deploy_poc.sh
+```
 
 ---
 
