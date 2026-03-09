@@ -930,7 +930,7 @@ DROP COMPUTE POOL IF EXISTS AI_EXTRACT_POC_POOL;
 
 ## Validating the Deployment (Tests)
 
-The POC includes a comprehensive test suite (1,053 tests across 44 files) that verifies every SQL object, data quality, extraction pipeline, writeback workflow, review logic, RBAC permissions, concurrency, confidence scoring, multi-doc-type isolation, all Streamlit pages across all three Snowflake clouds (AWS, Azure, GCP), and a full user workflow E2E test. Running tests after deployment proves everything works end-to-end.
+The POC includes a comprehensive test suite (1,080 tests across 44 files) that verifies every SQL object, data quality, extraction pipeline, writeback workflow, review logic, RBAC permissions, concurrency, confidence scoring, multi-doc-type isolation, all Streamlit pages across all three Snowflake clouds (AWS, Azure, GCP), and a full user workflow E2E test. Running tests after deployment proves everything works end-to-end.
 
 > **If you only ran the SQL scripts in Snowsight** (steps 1-7), the tests are optional but recommended. They catch issues like missing grants, encryption mismatches, and parse failures that you might not notice manually.
 
@@ -1165,13 +1165,13 @@ uv run pytest tests/test_e2e/test_poc_multi_doc.py -v
 | `test_sql_integration.py` | 52 | Every SQL object: tables, columns, PKs, views, stream, task, stored proc |
 | `test_sql_parity.py` | 10 | SQL script DDL matches live Snowflake objects |
 | `test_teardown_idempotency.py` | 15 | Teardown script is idempotent (safe to run multiple times) |
-| `test_user_workflow_e2e.py` | 8 | Full user workflow: approve, correct, re-edit, audit trail, rollback |
+| `test_user_workflow_e2e.py` | 35 | Full user workflow: approve, correct, re-edit, audit trail, rollback + edge cases (injection, unicode, overflow, boundary values) |
 | `test_utility_bill_extraction.py` | 49 | Utility bill extraction quality: account number, service dates, charges |
 | `test_validation_rules.py` | 27 | Validation rule tests: per-doc-type rules, boundary conditions |
 | `test_writeback_data_validation.py` | 20 | Writeback data quality, corrected field types, review status values |
 | `test_writeback_integration.py` | 19 | INVOICE_REVIEW table operations, V_INVOICE_SUMMARY, COALESCE override |
 | `test_e2e/` (7 files) | 103 | Playwright browser tests: all 5 pages + Admin + multi-doc flows, no exceptions |
-| **Total** | **~1,053** | **950 non-E2E + 103 E2E across 44 test files** |
+| **Total** | **~1,080** | **977 non-E2E + 103 E2E across 44 test files** |
 
 ### Cross-Cloud Verification
 
