@@ -48,9 +48,13 @@ def _safe_num(v):
     if isinstance(v, float) and pd.isna(v):
         return None
     try:
-        return float(v)
+        f = float(v)
     except (ValueError, TypeError):
         return None
+    # NUMBER(12,2) range: -9999999999.99 to 9999999999.99
+    if f > 9999999999.99 or f < -9999999999.99:
+        return None
+    return f
 
 
 def _safe_date(v):
@@ -177,6 +181,21 @@ class TestSafeNum:
         # pd.NA is not a float, so it hits the try/except path
         assert _safe_num(pd.NA) is None
 
+    def test_max_number_12_2(self):
+        assert _safe_num(9999999999.99) == pytest.approx(9999999999.99)
+
+    def test_min_number_12_2(self):
+        assert _safe_num(-9999999999.99) == pytest.approx(-9999999999.99)
+
+    def test_overflow_returns_none(self):
+        assert _safe_num(99999999999.99) is None
+
+    def test_negative_overflow_returns_none(self):
+        assert _safe_num(-99999999999.99) is None
+
+    def test_just_over_max_returns_none(self):
+        assert _safe_num(10000000000.00) is None
+
 
 # ---------------------------------------------------------------------------
 # _safe_date tests
@@ -213,6 +232,25 @@ class TestSafeDate:
         # depending on pandas version. Either None or "NaT" is acceptable.
         result = _safe_date("")
         assert result is None or result == "NaT"
+
+    def test_epoch_date(self):
+        assert _safe_date("1970-01-01") == "1970-01-01"
+
+    def test_far_future_date(self):
+        assert _safe_date("2099-12-31") == "2099-12-31"
+
+    def test_whitespace_only_returns_none(self):
+        result = _safe_date("   ")
+        assert result is None or result == "NaT"
+
+    def test_partial_date_string(self):
+        # "2025-13-01" is month 13 — should be None
+        assert _safe_date("2025-13-01") is None
+
+    def test_numeric_string_as_date(self):
+        # pd.to_datetime interprets numeric-ish strings; just verify no crash
+        result = _safe_date("20250315")
+        assert result is None or isinstance(result, str)
 
 
 # ---------------------------------------------------------------------------
@@ -278,3 +316,35 @@ class TestSourceParity:
         with open(review_path) as f:
             source = f.read()
         assert "def _safe_date(v):" in source
+
+    def test_safe_num_has_range_check(self):
+        """_safe_num in 3_Review.py must enforce NUMBER(12,2) range."""
+        import os
+        review_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "streamlit", "pages", "3_Review.py",
+        )
+        with open(review_path) as f:
+            source = f.read()
+        assert "9999999999.99" in source, (
+            "_safe_num must check NUMBER(12,2) range boundary"
+        )
+
+    def test_presave_validation_exists(self):
+        """3_Review.py must contain the pre-save validation loop."""
+        import os
+        review_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "streamlit", "pages", "3_Review.py",
+        )
+        with open(review_path) as f:
+            source = f.read()
+        assert "validation_errors" in source, (
+            "Pre-save validation loop must exist in 3_Review.py"
+        )
+        assert "not a valid number" in source, (
+            "Number validation error message must exist"
+        )
+        assert "not a valid date" in source, (
+            "Date validation error message must exist"
+        )

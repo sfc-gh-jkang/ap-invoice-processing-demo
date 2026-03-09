@@ -349,6 +349,17 @@ if changed_rows:
                             f"**{ref}** — {vc.replace('_', ' ').title()}: "
                             f"'{raw_val}' is not a valid number"
                         )
+                elif ftype == "DATE":
+                    raw_str = str(raw_val).strip()
+                    if raw_str:
+                        try:
+                            pd.to_datetime(raw_str)
+                        except (ValueError, TypeError):
+                            validation_errors.append(
+                                f"**{ref}** — {vc.replace('_', ' ').title()}: "
+                                f"'{raw_str}' is not a valid date "
+                                f"(expected YYYY-MM-DD)"
+                            )
 
         if validation_errors:
             st.error("**Validation failed — changes not saved:**")
