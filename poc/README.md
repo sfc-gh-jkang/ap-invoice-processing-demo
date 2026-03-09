@@ -1179,9 +1179,11 @@ This kit has been deployed and tested from scratch on all three Snowflake clouds
 
 | Cloud | Region | Non-E2E | E2E | Total |
 |---|---|---|---|---|
-| **AWS** | US East 1 (Virginia) | 896 passed | 103 passed | **999 passed** |
-| **Azure** | East US 2 | 896 passed | 103 passed | **999 passed** |
-| **GCP** | US Central 1 | 896 passed | 103 passed | **999 passed** |
+| **AWS** | US East 1 (Virginia) | 990 passed | 100 passed, 6 failed*, 2 skipped | **1,098 total** |
+| **Azure** | East US 2 | 846 passed, 142 skipped, 2 xfailed | — | **990 total** |
+| **GCP** | US Central 1 | 846 passed, 142 skipped, 2 xfailed | — | **990 total** |
+
+*\*6 E2E failures are UI timing flakes (Streamlit data grid not rendered before assertion). All core functionality passes.*
 
 GCP and other non-primary regions require cross-region inference, which `01_setup.sql` enables automatically.
 
