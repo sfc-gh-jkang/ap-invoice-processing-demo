@@ -4,7 +4,7 @@ Landing page with pipeline status and overview.
 """
 
 import streamlit as st
-from config import DB, get_session
+from config import DB, get_session, inject_custom_css, sidebar_branding
 
 st.set_page_config(
     page_title="AI_EXTRACT POC",
@@ -13,10 +13,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.title("AI-Powered Document Extraction")
+inject_custom_css()
+
+# ── Hero header ───────────────────────────────────────────────────────────────
 st.markdown(
-    "**Extract structured data from your documents using Snowflake Cortex AI_EXTRACT — "
-    "no external services, no API keys, no infrastructure to manage.**"
+    '<h1 style="margin-bottom:0;">AI-Powered Document Extraction</h1>'
+    '<p style="font-size:1.15rem; color:#5a6577; margin-top:0.25rem;">'
+    'Extract structured data from your documents using '
+    '<strong style="color:#29B5E8;">Snowflake Cortex AI_EXTRACT</strong> &mdash; '
+    'no external services, no API keys, no infrastructure to manage.'
+    '</p>',
+    unsafe_allow_html=True,
 )
 
 st.divider()
@@ -129,6 +136,7 @@ except Exception:
 
 # --- Sidebar navigation guide ---
 with st.sidebar:
+    sidebar_branding()
     st.markdown("### Pages")
     st.markdown(
         """

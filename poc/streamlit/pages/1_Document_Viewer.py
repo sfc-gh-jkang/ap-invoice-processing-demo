@@ -14,9 +14,14 @@ import pypdfium2 as pdfium
 from config import (
     DB, STAGE, get_session, get_doc_type_labels, get_doc_types,
     get_doc_type_config, get_field_names_from_labels, _parse_variant,
+    inject_custom_css, sidebar_branding,
 )
 
 st.set_page_config(page_title="Document Viewer", page_icon="📋", layout="wide")
+
+inject_custom_css()
+with st.sidebar:
+    sidebar_branding()
 
 session = get_session()
 

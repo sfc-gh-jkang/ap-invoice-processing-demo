@@ -4,9 +4,13 @@ Page 2: Analytics — Spend/volume by sender, monthly trends, top line items.
 
 import streamlit as st
 import plotly.express as px
-from config import DB, get_session, get_doc_type_labels, get_doc_types
+from config import DB, get_session, get_doc_type_labels, get_doc_types, inject_custom_css, sidebar_branding
 
 st.set_page_config(page_title="Analytics", page_icon="📊", layout="wide")
+
+inject_custom_css()
+with st.sidebar:
+    sidebar_branding()
 
 session = get_session()
 

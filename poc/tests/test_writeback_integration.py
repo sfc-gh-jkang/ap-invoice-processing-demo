@@ -99,6 +99,9 @@ class TestInvoiceReviewTable:
 
     def test_table_is_writable(self, sf_cursor):
         """Verify we can INSERT and DELETE from INVOICE_REVIEW."""
+        # Clean up any stale rows from previous runs (idempotency)
+        sf_cursor.execute("DELETE FROM INVOICE_REVIEW WHERE record_id = -999")
+
         sf_cursor.execute(
             "INSERT INTO INVOICE_REVIEW (record_id, file_name, review_status) "
             "VALUES (-999, '__test_file__.pdf', 'APPROVED')"

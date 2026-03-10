@@ -19,9 +19,14 @@ from config import (
     DB, get_session, get_doc_type_labels, get_doc_types,
     get_doc_type_config, get_field_names_from_labels,
     get_field_name_for_key, _parse_variant,
+    inject_custom_css, sidebar_branding,
 )
 
 st.set_page_config(page_title="Review & Approve", page_icon="✅", layout="wide")
+
+inject_custom_css()
+with st.sidebar:
+    sidebar_branding()
 
 session = get_session()
 

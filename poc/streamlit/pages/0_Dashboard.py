@@ -3,10 +3,14 @@ Page 0: Dashboard — KPI cards, recent documents, extraction metrics.
 """
 
 import streamlit as st
-from config import DB, get_session, get_doc_type_labels, get_doc_types
+from config import DB, get_session, get_doc_type_labels, get_doc_types, inject_custom_css, sidebar_branding
 
 st.title("Document Processing Dashboard")
 st.caption("Powered by Snowflake Cortex AI_EXTRACT")
+
+inject_custom_css()
+with st.sidebar:
+    sidebar_branding()
 
 session = get_session()
 

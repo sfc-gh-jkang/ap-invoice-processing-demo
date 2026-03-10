@@ -12,9 +12,14 @@ import pandas as pd
 from config import (
     DB, get_session, get_all_doc_type_configs, get_doc_type_config,
     get_field_names_from_labels,
+    inject_custom_css, sidebar_branding,
 )
 
 st.set_page_config(page_title="Admin: Document Types", page_icon="⚙️", layout="wide")
+
+inject_custom_css()
+with st.sidebar:
+    sidebar_branding()
 
 session = get_session()
 

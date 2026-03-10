@@ -3,16 +3,88 @@ Runtime environment config — reads CURRENT_DATABASE() and CURRENT_SCHEMA()
 at startup so the same source code works in any Snowflake account.
 
 Usage in any page:
-    from config import DB, STAGE, get_session, get_doc_type_labels
+    from config import DB, STAGE, get_session, get_doc_type_labels, inject_custom_css
     session = get_session()
     session.sql(f"SELECT * FROM {DB}.EXTRACTED_FIELDS").to_pandas()
     stage_path = f"@{STAGE}/{file_name}"
     labels = get_doc_type_labels(session, "INVOICE")
     config = get_doc_type_config(session, "UTILITY_BILL")
+    inject_custom_css()  # call once per page for consistent styling
 """
 
 import json
+import streamlit as st
 from snowflake.snowpark.context import get_active_session
+
+
+# ── Shared CSS for demo polish ───────────────────────────────────────────────
+_CUSTOM_CSS = """
+<style>
+/* ── KPI metric cards ─────────────────────────────────────── */
+div[data-testid="stMetric"] {
+    background: linear-gradient(135deg, #f8fbff 0%, #eef4fb 100%);
+    border: 1px solid #d0e3f7;
+    border-left: 4px solid #29B5E8;
+    border-radius: 8px;
+    padding: 16px 20px 12px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+div[data-testid="stMetric"] label {
+    color: #5a6577 !important;
+    font-size: 0.85rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+    color: #1a1f36 !important;
+    font-weight: 600 !important;
+}
+
+/* ── Sidebar branding ─────────────────────────────────────── */
+section[data-testid="stSidebar"] > div:first-child {
+    padding-top: 1rem;
+}
+section[data-testid="stSidebar"] .brand-header {
+    text-align: center;
+    padding: 0.5rem 0 1rem 0;
+    border-bottom: 1px solid #e0e4ea;
+    margin-bottom: 1rem;
+}
+
+/* ── Data tables ──────────────────────────────────────────── */
+div[data-testid="stDataFrame"] {
+    border: 1px solid #e0e4ea;
+    border-radius: 8px;
+}
+
+/* ── Page dividers ────────────────────────────────────────── */
+hr {
+    border-color: #e0e4ea !important;
+}
+
+/* ── Buttons ──────────────────────────────────────────────── */
+button[kind="primary"] {
+    border-radius: 6px !important;
+}
+</style>
+"""
+
+
+def inject_custom_css():
+    """Inject shared CSS once per page. Call at the top of every page."""
+    st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
+
+
+def sidebar_branding():
+    """Render branded sidebar header. Call inside `with st.sidebar:`."""
+    st.markdown(
+        '<div class="brand-header">'
+        '<span style="font-size:1.6rem;">&#10052;</span><br>'
+        '<strong style="font-size:1.1rem; color:#29B5E8;">AI_EXTRACT</strong><br>'
+        '<span style="font-size:0.75rem; color:#8a94a6;">Document Processing POC</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _init_session():
