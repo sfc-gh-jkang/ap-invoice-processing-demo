@@ -18,11 +18,16 @@ def wait_for_streamlit(page, selectors=None, timeout=90_000):
 
 
 def get_metric_value(page, label_text):
-    """Extract numeric value from a stMetric whose text contains label_text."""
+    """Extract numeric value from a stMetric whose text contains label_text.
+
+    Comparison is case-insensitive because CSS ``text-transform: uppercase``
+    causes ``inner_text()`` to return uppercased labels in some browsers.
+    """
     metrics = page.locator('[data-testid="stMetric"]')
+    label_lower = label_text.lower()
     for i in range(metrics.count()):
         text = metrics.nth(i).inner_text()
-        if label_text in text:
+        if label_lower in text.lower():
             parts = [p.strip() for p in text.split("\n") if p.strip()]
             if len(parts) >= 2:
                 raw = parts[1].replace(",", "").replace("$", "").strip()

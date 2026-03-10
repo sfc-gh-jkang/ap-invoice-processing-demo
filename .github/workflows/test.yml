@@ -270,7 +270,8 @@ jobs:
             tests/test_e2e/test_poc_analytics.py \
             tests/test_e2e/test_poc_review.py \
             tests/test_e2e/test_poc_admin.py \
-            tests/test_e2e/test_poc_multi_doc.py; do
+            tests/test_e2e/test_poc_multi_doc.py \
+            tests/test_e2e/test_poc_branding.py; do
             echo "--- Running $test_file ---"
             uv run pytest "$test_file" \
               --timeout=120 -v --tb=short \
