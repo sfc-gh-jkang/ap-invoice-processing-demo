@@ -301,185 +301,206 @@ if len(ledger_df) > 0:
                     t2.metric(doc_labels.get("field_9", "Tax"), f"${tax:,.2f}")
                     t3.metric(doc_labels.get("field_10", "Total"), f"${total:,.2f}")
 
-            st.divider()
-            st.markdown("**Extracted Line Items**")
+        st.divider()
+        st.markdown("**Extracted Line Items**")
 
-            file_name_for_lines = file_row.iloc[0]["FILE_NAME"] if len(file_row) > 0 else ""
+        file_name_for_lines = str(file_row.iloc[0]["FILE_NAME"]) if len(file_row) > 0 else ""
 
-            if st.session_state.line_save_result and st.session_state.line_save_result.get("file") == file_name_for_lines:
-                result = st.session_state.line_save_result
-                st.success(f"Saved {result['count']} line item correction(s) — audit rows appended to LINE_ITEM_REVIEW")
-                if st.button("Continue Editing"):
-                    st.session_state.line_save_result = None
-                    st.rerun()
+        if st.session_state.line_save_result and st.session_state.line_save_result.get("file") == file_name_for_lines:
+            result = st.session_state.line_save_result
+            st.success(f"Saved {result['count']} line item correction(s) — audit rows appended to LINE_ITEM_REVIEW")
+            if st.button("Continue Editing"):
+                st.session_state.line_save_result = None
+                st.rerun()
 
-            line_items = session.sql(
-                f"""
-                SELECT
-                    line_id,
-                    line_number,
-                    description,
-                    category,
-                    quantity,
-                    unit_price,
-                    line_total
-                FROM {DB}.V_LINE_ITEM_DETAIL
-                WHERE file_name = ?
-                ORDER BY line_number
-                """,
-                params=[file_name_for_lines],
-            ).to_pandas()
+        line_items = session.sql(
+            f"""
+            SELECT
+                line_id,
+                line_number,
+                description,
+                category,
+                quantity,
+                unit_price,
+                line_total
+            FROM {DB}.V_LINE_ITEM_DETAIL
+            WHERE file_name = ?
+            ORDER BY line_number
+            """,
+            params=[file_name_for_lines],
+        ).to_pandas()
 
-            if len(line_items) > 0:
-                line_filter_key = f"lines|{file_name_for_lines}"
-                if "line_orig_key" not in st.session_state or st.session_state.line_orig_key != line_filter_key:
-                    st.session_state.line_orig_snapshot = line_items.copy()
-                    st.session_state.line_orig_key = line_filter_key
-                line_orig = st.session_state.line_orig_snapshot
+        if len(line_items) > 0:
+            line_filter_key = f"lines|{file_name_for_lines}"
+            if "line_orig_key" not in st.session_state or st.session_state.line_orig_key != line_filter_key:
+                st.session_state.line_orig_snapshot = line_items.copy()
+                st.session_state.line_orig_key = line_filter_key
+            line_orig = st.session_state.line_orig_snapshot
 
-                edited_lines = st.data_editor(
-                    line_items,
-                    column_config={
-                        "LINE_ID": None,
-                        "LINE_NUMBER": st.column_config.NumberColumn("#", disabled=True),
-                        "DESCRIPTION": st.column_config.TextColumn("Description"),
-                        "CATEGORY": st.column_config.TextColumn("Category"),
-                        "QUANTITY": st.column_config.NumberColumn("Qty", format="%.0f"),
-                        "UNIT_PRICE": st.column_config.NumberColumn("Unit Price", format="$%.2f"),
-                        "LINE_TOTAL": st.column_config.NumberColumn("Total", format="$%.2f"),
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                    num_rows="fixed",
-                    key=f"line_editor_{file_name_for_lines}",
+            edited_lines = st.data_editor(
+                line_items,
+                column_config={
+                    "LINE_ID": None,
+                    "LINE_NUMBER": st.column_config.NumberColumn("#", disabled=True),
+                    "DESCRIPTION": st.column_config.TextColumn("Description"),
+                    "CATEGORY": st.column_config.TextColumn("Category"),
+                    "QUANTITY": st.column_config.NumberColumn("Qty", format="%.0f"),
+                    "UNIT_PRICE": st.column_config.NumberColumn("Unit Price", format="$%.2f"),
+                    "LINE_TOTAL": st.column_config.NumberColumn("Total", format="$%.2f"),
+                },
+                hide_index=True,
+                use_container_width=True,
+                num_rows="fixed",
+                key=f"line_editor_{file_name_for_lines}",
+            )
+            for c in edited_lines.columns:
+                edited_lines[c] = edited_lines[c].apply(
+                    lambda v: v.item() if hasattr(v, "item") else v
                 )
 
-                def _lnorm(val):
-                    if val is None:
-                        return ""
-                    if isinstance(val, float) and pd.isna(val):
-                        return ""
-                    return str(val).strip()
+            def _lnorm(val):
+                if val is None:
+                    return ""
+                if isinstance(val, float) and pd.isna(val):
+                    return ""
+                return str(val).strip()
 
-                line_changes = []
-                for idx in range(min(len(line_orig), len(edited_lines))):
-                    orig = line_orig.iloc[idx]
-                    edit = edited_lines.iloc[idx]
-                    row_diffs = {}
-                    for col in ["DESCRIPTION", "CATEGORY", "QUANTITY", "UNIT_PRICE", "LINE_TOTAL"]:
-                        if _lnorm(orig.get(col)) != _lnorm(edit.get(col)):
-                            row_diffs[col] = (_lnorm(orig.get(col)), _lnorm(edit.get(col)))
-                    if row_diffs:
-                        line_changes.append({"idx": idx, "line_id": int(edit["LINE_ID"]), "diffs": row_diffs})
+            line_changes = []
+            for idx in range(min(len(line_orig), len(edited_lines))):
+                orig = line_orig.iloc[idx]
+                edit = edited_lines.iloc[idx]
+                row_diffs = {}
+                for col in ["DESCRIPTION", "CATEGORY", "QUANTITY", "UNIT_PRICE", "LINE_TOTAL"]:
+                    if _lnorm(orig.get(col)) != _lnorm(edit.get(col)):
+                        row_diffs[col] = (_lnorm(orig.get(col)), _lnorm(edit.get(col)))
+                if row_diffs:
+                    line_changes.append({"idx": idx, "line_id": int(edit["LINE_ID"]), "diffs": row_diffs})
 
-                st.divider()
+            st.divider()
 
-                if line_changes:
-                    st.warning(f"**{len(line_changes)} line item(s) with unsaved changes**")
+            if line_changes:
+                st.warning(f"**{len(line_changes)} line item(s) with unsaved changes**")
 
-                    change_rows = []
+                change_rows = []
+                for ch in line_changes:
+                    for col, (was, now) in ch["diffs"].items():
+                        ln_val = edited_lines.iloc[ch["idx"]]["LINE_NUMBER"]
+                        change_rows.append({
+                            "Line #": int(ln_val) if pd.notna(ln_val) else ch["idx"] + 1,
+                            "Field": col.replace("_", " ").title(),
+                            "Was": was if was else "(empty)",
+                            "Now": now if now else "(empty)",
+                        })
+                st.dataframe(pd.DataFrame(change_rows), hide_index=True, use_container_width=True)
+
+                if st.button(f"Save {len(line_changes)} Line Item Change(s)", type="primary"):
+                    import numpy as np
+
+                    def _to_native(v):
+                        if v is None:
+                            return None
+                        if isinstance(v, (np.integer,)):
+                            return int(v.item())
+                        if isinstance(v, (np.floating,)):
+                            return float(v.item())
+                        if isinstance(v, (np.str_, np.bytes_)):
+                            return str(v)
+                        if isinstance(v, np.bool_):
+                            return bool(v.item())
+                        return v
+
+                    def _safe_str(v):
+                        if v is None:
+                            return None
+                        if isinstance(v, float) and pd.isna(v):
+                            return None
+                        s = str(v).strip()
+                        return s if s else None
+
+                    def _safe_num(v):
+                        if v is None:
+                            return None
+                        if isinstance(v, float) and pd.isna(v):
+                            return None
+                        try:
+                            return float(v)
+                        except (ValueError, TypeError):
+                            return None
+
+                    COL_MAP = {
+                        "DESCRIPTION": "col_1",
+                        "CATEGORY": "col_2",
+                        "QUANTITY": "col_3",
+                        "UNIT_PRICE": "col_4",
+                        "LINE_TOTAL": "col_5",
+                    }
+
+                    validation_errors = []
                     for ch in line_changes:
-                        for col, (was, now) in ch["diffs"].items():
-                            change_rows.append({
-                                "Line #": int(edited_lines.iloc[ch["idx"]]["LINE_NUMBER"]),
-                                "Field": col.replace("_", " ").title(),
-                                "Was": was if was else "(empty)",
-                                "Now": now if now else "(empty)",
-                            })
-                    st.dataframe(pd.DataFrame(change_rows), hide_index=True, use_container_width=True)
+                        row = edited_lines.iloc[ch["idx"]]
+                        ln = int(row["LINE_NUMBER"]) if pd.notna(row["LINE_NUMBER"]) else ch["idx"] + 1
+                        for col in ["QUANTITY", "UNIT_PRICE", "LINE_TOTAL"]:
+                            raw_val = row.get(col)
+                            if raw_val is not None and not (isinstance(raw_val, float) and pd.isna(raw_val)):
+                                try:
+                                    float(raw_val)
+                                except (ValueError, TypeError):
+                                    validation_errors.append(f"Line #{ln} — {col.replace('_', ' ').title()}: '{raw_val}' is not a valid number")
 
-                    if st.button(f"Save {len(line_changes)} Line Item Change(s)", type="primary"):
-                        def _safe_str(v):
-                            if v is None:
-                                return None
-                            if isinstance(v, float) and pd.isna(v):
-                                return None
-                            s = str(v).strip()
-                            return s if s else None
+                    if validation_errors:
+                        st.error("**Validation failed — changes not saved:**")
+                        for err in validation_errors:
+                            st.markdown(f"- {err}")
+                        st.stop()
 
-                        def _safe_num(v):
-                            if v is None:
-                                return None
-                            if isinstance(v, float) and pd.isna(v):
-                                return None
-                            try:
-                                return float(v)
-                            except (ValueError, TypeError):
-                                return None
+                    saved = 0
+                    for ch in line_changes:
+                        row = edited_lines.iloc[ch["idx"]]
+                        line_id = int(row["LINE_ID"]) if pd.notna(row["LINE_ID"]) else ch["idx"] + 1
+                        record_id = str(file_row.iloc[0].get("RECORD_ID", "")) or None
+                        corrections_dict = {}
+                        for disp_col, ext_col in COL_MAP.items():
+                            val = row.get(disp_col)
+                            if ext_col in ("col_3", "col_4", "col_5"):
+                                cval = _safe_num(val)
+                            else:
+                                cval = _safe_str(val)
+                            if cval is not None:
+                                corrections_dict[ext_col] = cval
 
-                        COL_MAP = {
-                            "DESCRIPTION": "col_1",
-                            "CATEGORY": "col_2",
-                            "QUANTITY": "col_3",
-                            "UNIT_PRICE": "col_4",
-                            "LINE_TOTAL": "col_5",
-                        }
+                        session.sql(
+                            f"""
+                            INSERT INTO {DB}.LINE_ITEM_REVIEW (
+                                line_id, file_name, record_id,
+                                corrected_col_1, corrected_col_2,
+                                corrected_col_3, corrected_col_4, corrected_col_5,
+                                corrections
+                            ) SELECT
+                                ?, ?, ?,
+                                ?, ?, ?, ?, ?,
+                                PARSE_JSON(?)
+                            """,
+                            params=[_to_native(p) for p in [
+                                int(line_id),
+                                str(file_name_for_lines),
+                                record_id,
+                                _safe_str(row.get("DESCRIPTION")),
+                                _safe_str(row.get("CATEGORY")),
+                                _safe_num(row.get("QUANTITY")),
+                                _safe_num(row.get("UNIT_PRICE")),
+                                _safe_num(row.get("LINE_TOTAL")),
+                                json.dumps(corrections_dict),
+                            ]],
+                        ).collect()
+                        saved += 1
 
-                        validation_errors = []
-                        for ch in line_changes:
-                            row = edited_lines.iloc[ch["idx"]]
-                            ln = int(row["LINE_NUMBER"])
-                            for col in ["QUANTITY", "UNIT_PRICE", "LINE_TOTAL"]:
-                                raw_val = row.get(col)
-                                if raw_val is not None and not (isinstance(raw_val, float) and pd.isna(raw_val)):
-                                    try:
-                                        float(raw_val)
-                                    except (ValueError, TypeError):
-                                        validation_errors.append(f"Line #{ln} — {col.replace('_', ' ').title()}: '{raw_val}' is not a valid number")
-
-                        if validation_errors:
-                            st.error("**Validation failed — changes not saved:**")
-                            for err in validation_errors:
-                                st.markdown(f"- {err}")
-                            st.stop()
-
-                        saved = 0
-                        for ch in line_changes:
-                            row = edited_lines.iloc[ch["idx"]]
-                            line_id = int(row["LINE_ID"])
-                            corrections_dict = {}
-                            for disp_col, ext_col in COL_MAP.items():
-                                val = row.get(disp_col)
-                                if ext_col in ("col_3", "col_4", "col_5"):
-                                    cval = _safe_num(val)
-                                else:
-                                    cval = _safe_str(val)
-                                if cval is not None:
-                                    corrections_dict[ext_col] = cval
-
-                            session.sql(
-                                f"""
-                                INSERT INTO {DB}.LINE_ITEM_REVIEW (
-                                    line_id, file_name, record_id,
-                                    corrected_col_1, corrected_col_2,
-                                    corrected_col_3, corrected_col_4, corrected_col_5,
-                                    corrections
-                                ) SELECT
-                                    ?, ?, ?,
-                                    ?, ?, ?, ?, ?,
-                                    PARSE_JSON(?)
-                                """,
-                                params=[
-                                    line_id,
-                                    file_name_for_lines,
-                                    file_row.iloc[0].get("RECORD_ID"),
-                                    _safe_str(row.get("DESCRIPTION")),
-                                    _safe_str(row.get("CATEGORY")),
-                                    _safe_num(row.get("QUANTITY")),
-                                    _safe_num(row.get("UNIT_PRICE")),
-                                    _safe_num(row.get("LINE_TOTAL")),
-                                    json.dumps(corrections_dict),
-                                ],
-                            ).collect()
-                            saved += 1
-
-                        st.session_state.line_save_result = {"count": saved, "file": file_name_for_lines}
-                        st.session_state.line_orig_key = None
-                        st.rerun()
-                else:
-                    st.caption("No pending changes — edit any cell above, then save")
+                    st.session_state.line_save_result = {"count": saved, "file": file_name_for_lines}
+                    st.session_state.line_orig_key = None
+                    st.rerun()
             else:
-                st.info("No line items found for this document.")
+                st.caption("No pending changes — edit any cell above, then save")
+        else:
+            st.info("No line items found for this document.")
 else:
     st.info("No documents match the selected filters.")
 
