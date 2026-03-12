@@ -100,11 +100,11 @@ class TestDocTypeConfigSchema:
 # 2. Seed data integrity
 # ---------------------------------------------------------------------------
 class TestDocTypeSeeds:
-    """Validate seed rows for all four document types."""
+    """Validate seed rows for all five document types."""
 
-    EXPECTED_TYPES = ["CONTRACT", "INVOICE", "RECEIPT", "UTILITY_BILL"]
+    EXPECTED_TYPES = ["CONTRACT", "INVOICE", "LEASE", "RECEIPT", "UTILITY_BILL"]
 
-    def test_four_seeds_exist(self, sf_cursor):
+    def test_five_seeds_exist(self, sf_cursor):
         sf_cursor.execute("SELECT doc_type FROM DOCUMENT_TYPE_CONFIG ORDER BY doc_type")
         types = [r[0] for r in sf_cursor.fetchall()]
         assert types == self.EXPECTED_TYPES
@@ -215,6 +215,19 @@ class TestUtilityBillExceedsFixedColumns:
                        "rate_schedule", "kwh_usage", "demand_kw", "previous_balance",
                        "current_charges", "total_due", "due_date"]:
             assert field in prompt, f"UTILITY_BILL prompt missing '{field}'"
+
+    def test_lease_has_12_field_keys(self, sf_cursor):
+        """LEASE should have exactly 12 field keys (>10, needs VARIANT)."""
+        sf_cursor.execute(
+            "SELECT field_labels FROM DOCUMENT_TYPE_CONFIG "
+            "WHERE doc_type = 'LEASE'"
+        )
+        raw = sf_cursor.fetchone()[0]
+        labels = json.loads(raw) if isinstance(raw, str) else raw
+        field_keys = [k for k in labels if k.startswith("field_")]
+        assert len(field_keys) == 12, (
+            f"LEASE should have 12 field_* keys, got {len(field_keys)}: {field_keys}"
+        )
 
     def test_invoice_has_10_field_keys(self, sf_cursor):
         """INVOICE should have exactly 10 field keys (fits in fixed columns)."""
@@ -367,11 +380,14 @@ class TestThreeLevelCoalesce:
 
     def _get_first_record(self, sf_cursor):
         sf_cursor.execute(
-            "SELECT record_id, file_name, field_1, field_10 "
-            "FROM EXTRACTED_FIELDS LIMIT 1"
+            "SELECT e.record_id, e.file_name, e.field_1, e.field_10 "
+            "FROM EXTRACTED_FIELDS e "
+            "LEFT JOIN INVOICE_REVIEW rv ON rv.record_id = e.record_id "
+            "WHERE rv.record_id IS NULL "
+            "ORDER BY e.record_id LIMIT 1"
         )
         row = sf_cursor.fetchone()
-        assert row is not None, "Need at least 1 row in EXTRACTED_FIELDS"
+        assert row is not None, "Need at least 1 unreviewed row in EXTRACTED_FIELDS"
         return row
 
     def test_variant_correction_overrides_fixed(self, sf_cursor):
@@ -484,7 +500,7 @@ class TestActiveFiltering:
         # Restore any deactivated seeds
         sf_cursor.execute(
             "UPDATE DOCUMENT_TYPE_CONFIG SET active = TRUE "
-            "WHERE doc_type IN ('INVOICE', 'CONTRACT', 'RECEIPT', 'UTILITY_BILL')"
+            "WHERE doc_type IN ('INVOICE', 'CONTRACT', 'RECEIPT', 'UTILITY_BILL', 'LEASE')"
         )
         # Remove test row
         sf_cursor.execute(

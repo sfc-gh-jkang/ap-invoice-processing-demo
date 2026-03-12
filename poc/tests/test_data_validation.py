@@ -209,10 +209,12 @@ class TestExtractedTableData:
         assert bad == 0, f"Found {bad} line items with non-positive totals"
 
     def test_quantities_are_positive(self, sf_cursor):
-        """col_3 (quantity) should be > 0 when present."""
+        """col_3 (quantity) should be > 0 when present for INVOICE/RECEIPT docs."""
         sf_cursor.execute(
-            "SELECT COUNT(*) FROM EXTRACTED_TABLE_DATA "
-            "WHERE col_3 IS NOT NULL AND col_3 <= 0"
+            "SELECT COUNT(*) FROM EXTRACTED_TABLE_DATA t "
+            "JOIN RAW_DOCUMENTS r ON r.file_name = t.file_name "
+            "WHERE t.col_3 IS NOT NULL AND t.col_3 <= 0 "
+            "AND r.doc_type IN ('INVOICE', 'RECEIPT')"
         )
         bad = sf_cursor.fetchone()[0]
         assert bad == 0, f"Found {bad} line items with non-positive quantities"

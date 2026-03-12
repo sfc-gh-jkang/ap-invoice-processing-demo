@@ -93,7 +93,7 @@ echo "  Connection:    ${CONNECTION}"
 echo ""
 
 # ---------- Step 1: Create Snowflake objects ----------
-echo "[1/11] Creating database, schema, warehouse, stage..."
+echo "[1/12] Creating database, schema, warehouse, stage..."
 
 run_sql "$SCRIPT_DIR/sql/01_setup.sql"
 
@@ -101,7 +101,7 @@ echo "   Infrastructure created."
 
 # ---------- Step 2: Create tables ----------
 echo ""
-echo "[2/11] Creating tables (RAW_DOCUMENTS, EXTRACTED_FIELDS, EXTRACTED_TABLE_DATA)..."
+echo "[2/12] Creating tables (RAW_DOCUMENTS, EXTRACTED_FIELDS, EXTRACTED_TABLE_DATA)..."
 
 run_sql "$SCRIPT_DIR/sql/02_tables.sql"
 
@@ -109,7 +109,7 @@ echo "   Tables created."
 
 # ---------- Step 3: Stage sample invoices ----------
 echo ""
-echo "[3/11] Staging sample PDF invoices..."
+echo "[3/12] Staging sample PDF invoices..."
 
 # Check multiple locations for sample documents (first match wins)
 INVOICE_DIR="$REPO_DIR/data/invoices"
@@ -149,6 +149,24 @@ else
     echo "   Or upload your own documents to @${POC_DB}.${POC_SCHEMA}.${POC_STAGE}"
 fi
 
+# Upload multi-type docs (contracts, receipts, utility bills) if they exist in sample_documents
+MULTI_TYPE_DIR="$SCRIPT_DIR/sample_documents"
+MULTI_COUNT=$(ls "$MULTI_TYPE_DIR"/{contract,receipt,utility_bill,lease}_*.pdf 2>/dev/null | wc -l | tr -d ' ')
+if [ "$MULTI_COUNT" -gt 0 ]; then
+    echo "   Uploading $MULTI_COUNT multi-type documents (contracts, receipts, utility bills, leases)..."
+    for prefix in contract receipt utility_bill lease; do
+        if ls "$MULTI_TYPE_DIR"/${prefix}_*.pdf 1>/dev/null 2>&1; then
+            snow sql $CONNECTION_FLAG -q "
+                USE DATABASE ${POC_DB};
+                USE SCHEMA ${POC_SCHEMA};
+                PUT file://${MULTI_TYPE_DIR}/${prefix}_*.pdf @${POC_STAGE}
+                    AUTO_COMPRESS = FALSE
+                    OVERWRITE = TRUE;
+            "
+        fi
+    done
+fi
+
 # Refresh stage directory
 snow sql $CONNECTION_FLAG -q "
     USE DATABASE ${POC_DB};
@@ -164,10 +182,10 @@ echo "   Files staged and registered."
 # ---------- Step 4: Batch extraction ----------
 if [[ "${SKIP_EXTRACTION}" == "true" ]]; then
     echo ""
-    echo "[4/11] Skipping batch extraction (--skip-extraction flag set)."
+    echo "[4/12] Skipping batch extraction (--skip-extraction flag set)."
 else
     echo ""
-    echo "[4/11] Running batch AI_EXTRACT on all staged documents..."
+    echo "[4/12] Running batch AI_EXTRACT on all staged documents..."
     echo "   (This may take several minutes depending on document count)"
 
     run_sql "$SCRIPT_DIR/sql/04_batch_extract.sql"
@@ -177,7 +195,7 @@ fi
 
 # ---------- Step 5: Create views ----------
 echo ""
-echo "[5/11] Creating analytical views..."
+echo "[5/12] Creating analytical views..."
 
 run_sql "$SCRIPT_DIR/sql/05_views.sql"
 
@@ -185,7 +203,7 @@ echo "   Views created."
 
 # ---------- Step 6: Set up automation ----------
 echo ""
-echo "[6/11] Setting up Stream + Task automation..."
+echo "[6/12] Setting up Stream + Task automation..."
 
 run_sql "$SCRIPT_DIR/sql/06_automate.sql"
 
@@ -193,7 +211,7 @@ echo "   Automation configured."
 
 # ---------- Step 7: Deploy Streamlit app ----------
 echo ""
-echo "[7/11] Deploying POC Streamlit dashboard..."
+echo "[7/12] Deploying POC Streamlit dashboard..."
 
 # Upload Streamlit files
 snow sql $CONNECTION_FLAG -q "
@@ -220,6 +238,8 @@ snow sql $CONNECTION_FLAG -q "
         AUTO_COMPRESS = FALSE OVERWRITE = TRUE;
     PUT file://${SCRIPT_DIR}/streamlit/pages/4_Admin.py @STREAMLIT_STAGE/pages/
         AUTO_COMPRESS = FALSE OVERWRITE = TRUE;
+    PUT file://${SCRIPT_DIR}/streamlit/pages/5_Cost.py @STREAMLIT_STAGE/pages/
+        AUTO_COMPRESS = FALSE OVERWRITE = TRUE;
 "
 
 # Create compute pool + Streamlit app (uses dollar-quoted blocks handled by run_sql)
@@ -229,7 +249,7 @@ echo "   Dashboard deployed."
 
 # ---------- Step 8: Create writeback table + review view ----------
 echo ""
-echo "[8/11] Creating writeback table and review view..."
+echo "[8/12] Creating writeback table and review view..."
 
 run_sql "$SCRIPT_DIR/sql/08_writeback.sql"
 
@@ -237,7 +257,7 @@ echo "   Writeback table and review view created."
 
 # ---------- Step 9: Create document type config ----------
 echo ""
-echo "[9/11] Creating document type configuration..."
+echo "[9/12] Creating document type configuration..."
 
 run_sql "$SCRIPT_DIR/sql/09_document_types.sql"
 
@@ -246,19 +266,19 @@ echo "   Document type config created."
 # ---------- Step 10: Production hardening (optional) ----------
 if [[ "${POC_HARDEN:-true}" == "true" ]]; then
     echo ""
-    echo "[10/11] Applying production hardening..."
+    echo "[10/12] Applying production hardening..."
 
     run_sql "$SCRIPT_DIR/sql/10_harden.sql"
 
     echo "   Hardening applied (ownership → SYSADMIN, managed access, resource monitor)."
 else
     echo ""
-    echo "[10/11] Skipping hardening (POC_HARDEN=false)."
+    echo "[10/12] Skipping hardening (POC_HARDEN=false)."
 fi
 
 # ---------- Step 11: Extraction alerts ----------
 echo ""
-echo "[11/11] Setting up extraction failure alerts..."
+echo "[11/12] Setting up extraction failure alerts..."
 
 run_sql "$SCRIPT_DIR/sql/11_alerts.sql"
 
@@ -282,7 +302,7 @@ for TABLE in RAW_DOCUMENTS EXTRACTED_FIELDS EXTRACTED_TABLE_DATA DOCUMENT_TYPE_C
 done
 
 # Check required views
-for VIEW in V_DOCUMENT_SUMMARY V_INVOICE_SUMMARY; do
+for VIEW in V_DOCUMENT_SUMMARY V_INVOICE_SUMMARY V_AI_EXTRACT_COST_SUMMARY; do
     snow sql $CONNECTION_FLAG -q "SELECT 1 FROM ${POC_DB}.${POC_SCHEMA}.${VIEW} LIMIT 0" > /dev/null 2>&1
     if [ $? -eq 0 ]; then
         echo "   OK: View $VIEW exists"
@@ -329,6 +349,4 @@ echo "  Streamlit > ${POC_DB}.${POC_SCHEMA}.AI_EXTRACT_DASHBOARD"
 echo ""
 echo "Verify extraction results:"
 echo "  SELECT COUNT(*) FROM ${POC_DB}.${POC_SCHEMA}.EXTRACTED_FIELDS;"
-echo "  SELECT COUNT(*) FROM ${POC_DB}.${POC_SCHEMA}.EXTRACTED_TABLE_DATA;"
-echo "  SELECT * FROM ${POC_DB}.${POC_SCHEMA}.V_EXTRACTION_STATUS;"
-echo ""
+echo "  SELECT COUNT(*) F                                                                                                                               

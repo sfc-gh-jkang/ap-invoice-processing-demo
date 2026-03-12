@@ -87,8 +87,8 @@ class TestExistingDocTypesTable:
         options_text = page.inner_text("body")
         assert "UTILITY_BILL" in options_text, "UTILITY_BILL not found in admin page selectbox"
 
-    def test_dataframe_shows_at_least_4_types(self, page, app_url):
-        """Seed data includes INVOICE, CONTRACT, RECEIPT, UTILITY_BILL."""
+    def test_dataframe_shows_at_least_5_types(self, page, app_url):
+        """Seed data includes INVOICE, CONTRACT, RECEIPT, UTILITY_BILL, LEASE."""
         _navigate(page, app_url)
         if not _has_config_data(page):
             pytest.skip("No config data available in local Streamlit session")

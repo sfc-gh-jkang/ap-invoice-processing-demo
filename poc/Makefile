@@ -114,8 +114,9 @@ upload-streamlit: ## Re-upload Streamlit files to STREAMLIT_STAGE (after code ch
 	  PUT file://streamlit/pages/1_Document_Viewer.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
 	  PUT file://streamlit/pages/2_Analytics.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
 	  PUT file://streamlit/pages/3_Review.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
-	  PUT file://streamlit/pages/4_Admin.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
-	"
+    PUT file://streamlit/pages/4_Admin.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
+    PUT file://streamlit/pages/5_Cost.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
+  "
 	@echo "Streamlit files uploaded. Restart the app in Snowsight to pick up changes."
 
 redeploy-streamlit: upload-streamlit ## Upload files AND recreate Streamlit app with container runtime

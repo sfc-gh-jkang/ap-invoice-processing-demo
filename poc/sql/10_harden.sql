@@ -51,6 +51,9 @@ REVOKE ALL PRIVILEGES ON ALL VIEWS IN SCHEMA AI_EXTRACT_POC.DOCUMENTS FROM ROLE 
 USE ROLE ACCOUNTADMIN;
 REVOKE USAGE ON WAREHOUSE AI_EXTRACT_WH FROM ROLE PUBLIC;
 
+-- Grant ACCOUNT_USAGE access for cost observability views
+GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE AI_EXTRACT_APP;
+
 -- ---------------------------------------------------------------------------
 -- Step 4: Revoke account-level grants from AI_EXTRACT_APP
 -- ---------------------------------------------------------------------------

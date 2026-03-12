@@ -12,7 +12,7 @@
 --   - review_fields: JSON defining which fields are correctable and their types
 --   - active: Whether this doc type is enabled for extraction
 --
--- Seed rows: INVOICE, CONTRACT, RECEIPT, UTILITY_BILL
+-- Seed rows: INVOICE, CONTRACT, RECEIPT, UTILITY_BILL, LEASE
 -- Add your own types with a single INSERT statement — no code changes needed.
 -- =============================================================================
 
@@ -135,6 +135,31 @@ VALUES (
     PARSE_JSON('{"columns":["Tier","kWh Range","Rate per kWh","Amount"],"descriptions":["Rate tier name","kWh range for this tier","Rate per kWh in dollars","Tier charge amount"]}'),
     PARSE_JSON('{"correctable":["utility_company","account_number","meter_number","kwh_usage","total_due","due_date"],"display_order":["utility_company","account_number","meter_number","service_address","billing_period_start","billing_period_end","rate_schedule","kwh_usage","demand_kw","previous_balance","current_charges","total_due","due_date"],"types":{"utility_company":"VARCHAR","account_number":"VARCHAR","meter_number":"VARCHAR","service_address":"VARCHAR","billing_period_start":"DATE","billing_period_end":"DATE","rate_schedule":"VARCHAR","kwh_usage":"NUMBER","demand_kw":"NUMBER","previous_balance":"NUMBER","current_charges":"NUMBER","total_due":"NUMBER","due_date":"DATE"}}'),
     PARSE_JSON('{"total_due":{"required":true,"min":0,"max":100000},"current_charges":{"required":true,"min":0,"max":100000},"due_date":{"required":true,"date_min":"2020-01-01","date_max":"2030-12-31"},"billing_period_start":{"required":true},"billing_period_end":{"required":true},"kwh_usage":{"min":0,"max":999999},"demand_kw":{"min":0,"max":99999},"previous_balance":{"min":0,"max":100000},"utility_company":{"required":true}}')
+);
+
+-- ---------------------------------------------------------------------------
+-- Seed: LEASE
+-- ---------------------------------------------------------------------------
+MERGE INTO DOCUMENT_TYPE_CONFIG AS tgt
+USING (SELECT 'LEASE' AS doc_type) AS src
+ON tgt.doc_type = src.doc_type
+WHEN MATCHED THEN UPDATE SET
+    display_name = 'Lease',
+    extraction_prompt = 'Extract the following fields from this lease: landlord_name, tenant_name, lease_number, property_address, lease_start_date, lease_end_date, lease_term_months, monthly_rent, security_deposit, payment_due_day, late_fee, total_lease_value. FORMATTING RULES: Return all dates in YYYY-MM-DD format. Return all monetary values as plain numbers without currency symbols or commas (e.g. 1234.56 not $1,234.56). Return numeric values without units. Return 0 for zero or missing amounts, not null. Return the full legal company or person name, not abbreviations.',
+    field_labels = PARSE_JSON('{"field_1":"Landlord Name","field_2":"Tenant Name","field_3":"Lease Number","field_4":"Property Address","field_5":"Lease Start Date","field_6":"Lease End Date","field_7":"Lease Term (Months)","field_8":"Monthly Rent","field_9":"Security Deposit","field_10":"Payment Due Day","field_11":"Late Fee","field_12":"Total Lease Value","sender_label":"Landlord","amount_label":"Monthly Rent","date_label":"Lease Start Date","reference_label":"Lease #","secondary_ref_label":"Property"}'),
+    table_extraction_schema = PARSE_JSON('{"columns":["Month","Rent","Escalation","Total"],"descriptions":["Lease month or period","Base rent amount","Rent escalation or adjustment","Total rent for period"]}'),
+    review_fields = PARSE_JSON('{"correctable":["landlord_name","tenant_name","lease_number","property_address","lease_start_date","lease_end_date","lease_term_months","monthly_rent","security_deposit","payment_due_day","late_fee","total_lease_value"],"display_order":["landlord_name","tenant_name","lease_number","property_address","lease_start_date","lease_end_date","lease_term_months","monthly_rent","security_deposit","payment_due_day","late_fee","total_lease_value"],"types":{"landlord_name":"VARCHAR","tenant_name":"VARCHAR","lease_number":"VARCHAR","property_address":"VARCHAR","lease_start_date":"DATE","lease_end_date":"DATE","lease_term_months":"NUMBER","monthly_rent":"NUMBER","security_deposit":"NUMBER","payment_due_day":"NUMBER","late_fee":"NUMBER","total_lease_value":"NUMBER"}}'),
+    validation_rules = PARSE_JSON('{"monthly_rent":{"required":true,"min":0,"max":1000000},"security_deposit":{"min":0,"max":1000000},"total_lease_value":{"min":0,"max":100000000},"lease_term_months":{"min":1,"max":600},"payment_due_day":{"min":1,"max":31},"late_fee":{"min":0,"max":100000},"lease_start_date":{"required":true,"date_min":"2020-01-01","date_max":"2030-12-31"},"lease_end_date":{"date_min":"2020-01-01","date_max":"2040-12-31"},"landlord_name":{"required":true},"tenant_name":{"required":true}}'),
+    updated_at = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED THEN INSERT (doc_type, display_name, extraction_prompt, field_labels, table_extraction_schema, review_fields, validation_rules)
+VALUES (
+    'LEASE',
+    'Lease',
+    'Extract the following fields from this lease: landlord_name, tenant_name, lease_number, property_address, lease_start_date, lease_end_date, lease_term_months, monthly_rent, security_deposit, payment_due_day, late_fee, total_lease_value. FORMATTING RULES: Return all dates in YYYY-MM-DD format. Return all monetary values as plain numbers without currency symbols or commas (e.g. 1234.56 not $1,234.56). Return numeric values without units. Return 0 for zero or missing amounts, not null. Return the full legal company or person name, not abbreviations.',
+    PARSE_JSON('{"field_1":"Landlord Name","field_2":"Tenant Name","field_3":"Lease Number","field_4":"Property Address","field_5":"Lease Start Date","field_6":"Lease End Date","field_7":"Lease Term (Months)","field_8":"Monthly Rent","field_9":"Security Deposit","field_10":"Payment Due Day","field_11":"Late Fee","field_12":"Total Lease Value","sender_label":"Landlord","amount_label":"Monthly Rent","date_label":"Lease Start Date","reference_label":"Lease #","secondary_ref_label":"Property"}'),
+    PARSE_JSON('{"columns":["Month","Rent","Escalation","Total"],"descriptions":["Lease month or period","Base rent amount","Rent escalation or adjustment","Total rent for period"]}'),
+    PARSE_JSON('{"correctable":["landlord_name","tenant_name","lease_number","property_address","lease_start_date","lease_end_date","lease_term_months","monthly_rent","security_deposit","payment_due_day","late_fee","total_lease_value"],"display_order":["landlord_name","tenant_name","lease_number","property_address","lease_start_date","lease_end_date","lease_term_months","monthly_rent","security_deposit","payment_due_day","late_fee","total_lease_value"],"types":{"landlord_name":"VARCHAR","tenant_name":"VARCHAR","lease_number":"VARCHAR","property_address":"VARCHAR","lease_start_date":"DATE","lease_end_date":"DATE","lease_term_months":"NUMBER","monthly_rent":"NUMBER","security_deposit":"NUMBER","payment_due_day":"NUMBER","late_fee":"NUMBER","total_lease_value":"NUMBER"}}'),
+    PARSE_JSON('{"monthly_rent":{"required":true,"min":0,"max":1000000},"security_deposit":{"min":0,"max":1000000},"total_lease_value":{"min":0,"max":100000000},"lease_term_months":{"min":1,"max":600},"payment_due_day":{"min":1,"max":31},"late_fee":{"min":0,"max":100000},"lease_start_date":{"required":true,"date_min":"2020-01-01","date_max":"2030-12-31"},"lease_end_date":{"date_min":"2020-01-01","date_max":"2040-12-31"},"landlord_name":{"required":true},"tenant_name":{"required":true}}')
 );
 
 -- Verify

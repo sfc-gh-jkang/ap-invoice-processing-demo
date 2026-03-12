@@ -261,19 +261,41 @@ if len(ledger_df) > 0:
             if len(file_row) > 0 and file_row.iloc[0]["FILE_NAME"]:
                 file_name = file_row.iloc[0]["FILE_NAME"]
                 try:
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        stage_path = f"@{STAGE}/{file_name}"
-                        session.file.get(stage_path, tmpdir)
-                        local_path = os.path.join(tmpdir, file_name)
-                        pdf = pdfium.PdfDocument(local_path)
-                        for page_idx in range(len(pdf)):
-                            page = pdf[page_idx]
-                            bitmap = page.render(scale=2)
-                            pil_image = bitmap.to_pil()
-                            st.image(pil_image, use_container_width=True)
-                        pdf.close()
+                    stage_files = session.sql(
+                        f"SELECT RELATIVE_PATH FROM DIRECTORY(@{STAGE}) WHERE RELATIVE_PATH = '{file_name}'"
+                    ).collect()
+                    if not stage_files:
+                        st.warning(
+                            f"File **{file_name}** is not on stage `@{STAGE}`. "
+                            "Re-upload it or run `deploy_poc.sh` to sync stage files."
+                        )
+                    else:
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            stage_path = f"@{STAGE}/{file_name}"
+                            session.file.get(stage_path, tmpdir)
+                            local_path = os.path.join(tmpdir, file_name)
+                            if not os.path.exists(local_path):
+                                base = os.path.basename(file_name)
+                                alt_path = os.path.join(tmpdir, base)
+                                if os.path.exists(alt_path):
+                                    local_path = alt_path
+                            if not os.path.exists(local_path):
+                                downloaded = os.listdir(tmpdir)
+                                if downloaded:
+                                    local_path = os.path.join(tmpdir, downloaded[0])
+                                else:
+                                    raise FileNotFoundError(
+                                        f"session.file.get() returned no files for {stage_path}"
+                                    )
+                            pdf = pdfium.PdfDocument(local_path)
+                            for page_idx in range(len(pdf)):
+                                page = pdf[page_idx]
+                                bitmap = page.render(scale=2)
+                                pil_image = bitmap.to_pil()
+                                st.image(pil_image, use_container_width=True)
+                            pdf.close()
                 except Exception as e:
-                    st.warning(f"Could not render document: {e}")
+                    st.warning(f"Could not render document `{file_name}`: {e}")
             else:
                 st.info("No source file available.")
 

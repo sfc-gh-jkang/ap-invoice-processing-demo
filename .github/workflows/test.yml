@@ -25,6 +25,46 @@ env:
 
 jobs:
   # -----------------------------------------------------------------------
+  # Secret scanning — detect leaked credentials before they reach main
+  # -----------------------------------------------------------------------
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Run detect-secrets
+        run: |
+          pip install detect-secrets
+          detect-secrets scan --baseline .secrets.baseline
+          detect-secrets audit --report --baseline .secrets.baseline
+
+      - name: Check for private keys
+        run: |
+          FOUND=0
+          for pattern in '-----BEGIN.*PRIVATE KEY-----' 'AKIA[0-9A-Z]{16}' 'sk-[a-zA-Z0-9]{48}'; do
+            if grep -rIl "$pattern" --include='*.py' --include='*.yml' --include='*.yaml' \
+               --include='*.toml' --include='*.json' --include='*.sh' --include='*.sql' \
+               --exclude-dir='.git' --exclude='.secrets.baseline' . 2>/dev/null; then
+              echo "::error::Potential secret found matching pattern: $pattern"
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            echo "::error::Secret scan failed — review findings above"
+            exit 1
+          fi
+          echo "No secrets detected"
+
+  # -----------------------------------------------------------------------
   # Unit tests — no Snowflake connection required
   # -----------------------------------------------------------------------
   unit-tests:
@@ -300,7 +340,7 @@ jobs:
   summary:
     name: Cross-Cloud Summary
     runs-on: ubuntu-latest
-    needs: [unit-tests, sql-tests, e2e-tests]
+    needs: [secret-scan, unit-tests, sql-tests, e2e-tests]
     if: always()
     steps:
       - name: Generate summary
@@ -309,6 +349,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Secret Scan | ${{ needs.secret-scan.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Unit Tests | ${{ needs.unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| SQL Tests (aws) | ${{ needs.sql-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| SQL Tests (azure) | ${{ needs.sql-tests.result }} |" >> $GITHUB_STEP_SUMMARY

@@ -32,6 +32,7 @@ This kit walks you through a complete proof-of-concept:
 - [Multi-Document-Type Support](#multi-document-type-support)
 - [File Structure](#file-structure)
 - [Troubleshooting](#troubleshooting)
+- [Cost Observability](#cost-observability)
 - [Cost Estimate](#cost-estimate)
 - [Cleanup](#cleanup)
 - [Validating the Deployment (Tests)](#validating-the-deployment-tests)
@@ -39,6 +40,8 @@ This kit walks you through a complete proof-of-concept:
 - [Next Steps](#next-steps)
 - [Building a Production PDF Extraction Pipeline](#building-a-production-pdf-extraction-pipeline)
 - [Customer Handoff Checklist](#customer-handoff-checklist)
+- [Secret Scanning & Security](#secret-scanning--security)
+- [Cross-Cloud Deployment Notes](#cross-cloud-deployment-notes)
 
 ---
 
@@ -790,7 +793,9 @@ ai_extract_poc/
 │   ├── 09_document_types.sql              # DOCUMENT_TYPE_CONFIG table + seed rows
 │   ├── 09_line_item_review.sql            # LINE_ITEM_REVIEW table + V_LINE_ITEM_DETAIL view
 │   ├── 10_harden.sql                      # Production hardening (ownership, managed access, resource monitor, retention)
-│   └── 11_alerts.sql                      # Extraction failure alert + health check procedure
+│   ├── 11_alerts.sql                      # Extraction failure alert + health check procedure
+│   ├── 12_cost_views.sql                  # 6 cost observability views (token usage, credit trends)
+│   └── 13_cost_attribution.sql            # Per-PDF cost attribution: page count UDF, cost driver views
 ├── streamlit/
 │   ├── streamlit_app.py                   # Landing page + pipeline overview
 │   ├── config.py                          # Dynamic config (zero hardcoded values)
@@ -802,7 +807,8 @@ ai_extract_poc/
 │       ├── 1_Document_Viewer.py           # Browse, filter, drill-down + PDF viewer
 │       ├── 2_Analytics.py                 # Charts: by sender, monthly, aging, top items
 │       ├── 3_Review.py                    # Inline data_editor for review/correction writeback
-│       └── 4_Admin.py                     # Document type config management
+│       ├── 4_Admin.py                     # Document type config management
+│       └── 5_Cost.py                      # Cost observability: credit trends, token analysis, cost drivers
 └── tests/
     ├── __init__.py                        # Package marker
     ├── test_admin_builder.py              # Admin page builder logic (unit — no Snowflake)
@@ -814,6 +820,7 @@ ai_extract_poc/
     ├── test_config_functions.py           # Config function tests
     ├── test_config_helpers.py             # Config helper tests (unit — no Snowflake)
     ├── test_contract_extraction.py        # Contract extraction quality
+    ├── test_cost_views.py                 # Cost view SQL validation + data checks
     ├── test_cross_doc_isolation.py        # Cross-doc-type isolation
     ├── test_dashboard_queries.py          # Dashboard page SQL queries
     ├── test_data_drift.py                 # Boundary values, schema evolution
@@ -823,6 +830,7 @@ ai_extract_poc/
     ├── test_document_viewer_queries.py    # Document Viewer page SQL queries
     ├── test_edge_cases.py                 # Rollbacks, SQL injection, large data, gaps
     ├── test_extraction_pipeline.py        # Live AI_EXTRACT, stored proc, idempotency
+    ├── test_lease_extraction.py           # Lease extraction quality
     ├── test_load_stress.py                # Bulk inserts + concurrent writers
     ├── test_multi_user_concurrency.py     # Interleaved reviews + race conditions
     ├── test_normalize_unit.py             # Normalization unit tests (unit — no Snowflake)
@@ -855,7 +863,7 @@ ai_extract_poc/
         └── test_poc_review.py             # Review page tests
 ```
 
-**Run scripts in order: 01 -> 02 -> (upload files) -> 03 -> 04 -> 05 -> (optionally 06, 07, 08, 09)**
+**Run scripts in order: 01 -> 02 -> (upload files) -> 03 -> 04 -> 05 -> (optionally 06, 07, 08, 09, 10, 11, 12, 13)**
 
 ---
 
@@ -879,6 +887,61 @@ ai_extract_poc/
 | E2E: "Vendor" label not found | "Vendor" is INVOICE-specific; other doc types show different labels | Assert on universal labels like "Status" or select INVOICE before asserting |
 | Azure/GCP: `CREATE STREAMLIT` fails | Streamlit files not uploaded to stage | `PUT` all files (`.py`, `pyproject.toml`, `environment.yml`, `snowflake.yml`) before creating the app |
 | Azure/GCP: `CREATE COMPUTE POOL` access denied | Running as app role, not ACCOUNTADMIN | Compute pools, network rules, and EAI require `USE ROLE ACCOUNTADMIN` |
+| PDF preview: "File not on stage" warning | Document registered in `RAW_DOCUMENTS` but PDF not uploaded to `@DOCUMENT_STAGE` | Re-run `deploy_poc.sh` or manually `PUT` the missing file. On GCP, multi-type docs (contracts, receipts, utility bills) may not have been uploaded if `data/invoices/` was the primary source. |
+| PDF preview: "Could not render document" | `session.file.get()` failed inside Container Runtime — often a stage path or permissions issue | Verify file exists: `SELECT * FROM DIRECTORY(@DOCUMENT_STAGE) WHERE RELATIVE_PATH = '<file>';`. Check that `pypdfium2` is in `environment.yml`. Confirm the compute pool is ACTIVE. |
+| PDF preview: blank/missing on Azure or GCP | Stage has fewer files than `RAW_DOCUMENTS` (e.g., 100 vs 130) | Run `SELECT COUNT(*) FROM DIRECTORY(@DOCUMENT_STAGE);` vs `SELECT COUNT(*) FROM RAW_DOCUMENTS;`. Upload missing files with `PUT file://... @DOCUMENT_STAGE AUTO_COMPRESS=FALSE;` then `ALTER STAGE DOCUMENT_STAGE REFRESH;` |
+
+---
+
+## Cost Observability
+
+The POC includes a full cost observability layer that tracks AI_EXTRACT credit consumption using Snowflake's first-party billing view (`CORTEX_AI_FUNCTIONS_USAGE_HISTORY`) — no hardcoded dollar amounts.
+
+### SQL Objects
+
+| Script | Object | Purpose |
+|---|---|---|
+| `12_cost_views.sql` | `V_AI_EXTRACT_TOKEN_USAGE` | Per-call token and credit metrics |
+| | `V_AI_EXTRACT_CREDIT_TREND` | Daily credit consumption trend |
+| | `V_AI_EXTRACT_CREDIT_SUMMARY` | Aggregate credit stats (total, avg, min, max) |
+| | `V_AI_EXTRACT_TOKEN_DISTRIBUTION` | Token count bucketed into ranges |
+| | `V_AI_EXTRACT_COST_PER_DOC` | Credits per unique document (total calls / unique docs) |
+| | `V_AI_EXTRACT_MODEL_COST` | Credit breakdown by model version |
+| `13_cost_attribution.sql` | `UDF_PDF_PAGE_COUNT` | Python UDF — counts pages in a staged PDF via `pypdfium2` |
+| | `SP_POPULATE_DOC_METADATA` | Stored proc — backfills `PAGE_COUNT` and `FILE_SIZE_BYTES` for all docs |
+| | `V_DOC_TYPE_FIELD_COUNTS` | Field count per document type (from extraction prompt) |
+| | `V_AI_EXTRACT_COST_PER_PDF` | Per-PDF cost attribution: joins billing → query history → document |
+| | `V_AI_EXTRACT_COST_DRIVERS` | Aggregated cost drivers by doc type with correlations |
+
+### New Columns on RAW_DOCUMENTS
+
+| Column | Type | Source |
+|---|---|---|
+| `PAGE_COUNT` | INT | Backfilled via `UDF_PDF_PAGE_COUNT` (reads PDF from stage) |
+| `FILE_SIZE_BYTES` | INT | Backfilled from `DIRECTORY(@DOCUMENT_STAGE)` |
+
+### Cost Page (Streamlit)
+
+The **Cost** page (`5_Cost.py`) provides:
+- Credit consumption trend (daily bar chart)
+- Per-document cost metrics (credits/doc)
+- Token distribution histogram
+- Model cost breakdown
+- **Cost Drivers** — per-PDF attribution showing what makes a PDF cost more (page count, tokens, fields extracted, content density)
+- Scatter plots: Pages vs Credits, Tokens vs Credits
+- Per-PDF detail table
+
+### Key Findings (from 140 sample documents)
+
+| Doc Type | Avg Pages | Avg Tokens | Avg Credits | Credits/Page | Token↔Credit Corr. |
+|---|---|---|---|---|---|
+| INVOICE | 1.2 | 1,583 | 0.007913 | 0.006688 | 1.0 |
+| UTILITY_BILL | 1.0 | 1,335 | 0.006674 | 0.006674 | 1.0 |
+| CONTRACT | 1.0 | 1,242 | 0.006211 | 0.006211 | 1.0 |
+| LEASE | 1.0 | 1,237 | 0.006183 | 0.006183 | 1.0 |
+| RECEIPT | 1.0 | 1,224 | 0.006118 | 0.006118 | 1.0 |
+
+**Token↔Credit correlation = 1.0** across all document types, confirming AI_EXTRACT credits are purely token-based (no fixed per-call overhead). **Page↔Token correlation = 0.9754** for invoices (more pages = proportionally more tokens).
 
 ---
 
@@ -892,6 +955,18 @@ AI_EXTRACT pricing is based on Cortex AI tokens:
 | Each image file (PNG, JPG, etc.) | 970 tokens (= 1 page) |
 | Input prompt tokens | Variable (typically small) |
 | Output tokens | Variable |
+
+**Measured cost from this POC** (140 documents across 5 types):
+
+| Metric | Value |
+|---|---|
+| Average credits per single-page extraction | ~0.006–0.008 |
+| Average tokens per single-page extraction | ~1,200–1,600 |
+| Credits for 100 single-page invoices (13 fields) | ~0.79 credits |
+| Credits for 100 single-page utility bills (19 fields) | ~0.67 credits |
+| What drives credit variation | Page count (0.97 corr.), content density, field count |
+
+> **Note:** Credits are reported in Snowflake credits, not USD. Your contract's credit price determines the dollar cost. Use the Cost page in the Streamlit dashboard to see real-time credit consumption from `CORTEX_AI_FUNCTIONS_USAGE_HISTORY`.
 
 **Example: 100 single-page invoices with 10 entity questions + 1 table question**
 - Input: 100 files x 970 tokens/page = 97,000 tokens
@@ -1535,9 +1610,10 @@ This section provides a comprehensive, step-by-step guide for building a fully e
 │  └────────────────────────────┘                      │                  │
 │                                                      │                  │
 │  ┌────────────────────────────┐    ┌─────────────────┴──────────────┐  │
-│  │  Resource Monitor          │    │  Extraction Failure Alert      │  │
-│  │  (100 credits/month cap)   │    │  (fires on 3+ failures/24h)   │  │
-│  └────────────────────────────┘    └────────────────────────────────┘  │
+│  │  Cost Observability        │    │  Extraction Failure Alert      │  │
+│  │  (9 views from billing +   │    │  (fires on 3+ failures/24h)   │  │
+│  │   query history)           │    └────────────────────────────────┘  │
+│  └────────────────────────────┘                      │                  │
 │                                                      │                  │
 │                                                      ▼                  │
 │                                    ┌────────────────────────────────┐  │
@@ -1996,6 +2072,90 @@ SELECT e.file_name, e.raw_extraction FROM EXTRACTED_FIELDS e JOIN RAW_DOCUMENTS 
 - **ACCOUNTADMIN is required for infrastructure, not the app.** Compute pools, network rules, and External Access Integrations all require `ACCOUNTADMIN`. The app role (`AI_EXTRACT_APP`) can't create them. Pattern: ACCOUNTADMIN creates infra + grants, then switch to app role for `CREATE STREAMLIT`.
 - **Test skip counts vary by data volume.** Azure/GCP with 100 documents skip ~142 tests that pass on AWS (130 documents). Skip guards like "at least N rows exist" cause this. The skipped tests aren't broken — they just lack the data to exercise those code paths.
 - **AWS runs slower because it runs more tests.** 990 actual executions vs 846 on Azure/GCP. Combined with more rows per query (130 vs 100 docs), AWS takes ~2x the wall-clock time. Per-test speed is comparable across clouds.
+
+---
+
+## Secret Scanning & Security
+
+This project includes automated secret detection to prevent accidental credential leaks.
+
+### Pre-commit Hooks (Local)
+
+Install pre-commit to scan for secrets on every commit:
+
+```bash
+pip install pre-commit detect-secrets
+pre-commit install
+```
+
+The `.pre-commit-config.yaml` includes:
+- **detect-secrets** — scans for high-entropy strings, AWS keys, private keys, and other credential patterns
+- **detect-private-key** — catches `-----BEGIN * PRIVATE KEY-----` blocks
+- **check-added-large-files** — prevents accidental commit of large binaries (>1 MB)
+
+A `.secrets.baseline` file tracks known false positives (e.g., GitHub Actions `${{ secrets.* }}` references). To update the baseline after a legitimate change:
+
+```bash
+detect-secrets scan --baseline .secrets.baseline
+detect-secrets audit .secrets.baseline
+```
+
+### CI/CD Secret Scanning
+
+The GitHub Actions workflow (`.github/workflows/test.yml`) includes a **Secret Scan** job that runs on every push and PR:
+1. Validates the `.secrets.baseline` against the current codebase
+2. Greps for common secret patterns (AWS access keys, OpenAI keys, private key headers)
+3. Fails the build if any unaudited secrets are found
+
+### What's Already Protected
+
+The `.gitignore` files exclude:
+- `.env`, `.env.*` — environment variable files
+- `credentials.json`, `service_account*.json` — cloud provider credentials
+- `*.pem`, `*.key`, `*.p12`, `*.pfx` — certificate/key files
+- `.streamlit/secrets.toml` — Streamlit connection secrets
+- `.aws/`, `.gcp/` — cloud CLI config directories
+
+---
+
+## Cross-Cloud Deployment Notes
+
+### Stage File Counts
+
+When deploying across AWS, Azure, and GCP, verify that all clouds have the same stage file count:
+
+```sql
+SELECT COUNT(*) FROM DIRECTORY(@DOCUMENT_STAGE);  -- Should match across clouds
+SELECT COUNT(*) FROM RAW_DOCUMENTS;                -- Should match stage count
+```
+
+**Common mismatch:** `deploy_poc.sh` prioritizes `data/invoices/` (100 invoice PDFs). Multi-type documents (contracts, receipts, utility bills) in `poc/sample_documents/` are uploaded separately. If you deployed before the multi-type upload step was added, run:
+
+```sql
+-- Upload missing multi-type docs (run from local machine)
+PUT file:///path/to/poc/sample_documents/contract_*.pdf @DOCUMENT_STAGE AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/poc/sample_documents/receipt_*.pdf @DOCUMENT_STAGE AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/poc/sample_documents/utility_bill_*.pdf @DOCUMENT_STAGE AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+ALTER STAGE DOCUMENT_STAGE REFRESH;
+```
+
+### PDF Preview Requirements
+
+The Document Viewer page renders PDFs using `pypdfium2` inside Container Runtime. For it to work:
+
+1. **`pypdfium2`** must be listed in both `environment.yml` and `pyproject.toml`
+2. **`PYPI_ACCESS_INTEGRATION`** EAI must exist and be granted to the Streamlit app
+3. **Compute pool** must be ACTIVE (`DESCRIBE COMPUTE POOL AI_EXTRACT_POC_POOL;`)
+4. **File must exist on stage** — the viewer now checks `DIRECTORY(@DOCUMENT_STAGE)` before attempting download
+
+### Redeploying Across Clouds
+
+```bash
+# Redeploy Streamlit to all three clouds
+make redeploy-streamlit CONNECTION=aws_spcs
+make redeploy-streamlit CONNECTION=azure_spcs
+make redeploy-streamlit CONNECTION=gcp_spcs
+```
 
 ---
 

@@ -44,6 +44,8 @@ $$
 BEGIN
     LET files_processed INT := 0;
 
+    ALTER SESSION SET QUERY_TAG = 'ai_extract:proc=SP_EXTRACT_NEW_DOCUMENTS:doc_type=INVOICE';
+
     -- Entity extraction for unprocessed files
     -- Populates fixed columns AND raw_extraction VARIANT
     INSERT INTO EXTRACTED_FIELDS (
@@ -313,6 +315,20 @@ _FIELD_DESCRIPTIONS = {
     'kwh_usage':        "What is the total kWh electricity usage for this billing period? "
                         "Return as a plain number without 'kWh' units.",
     'demand_kw':        "What is the peak demand in kW? Return as a plain number without 'kW' units.",
+
+    # ── Lease fields ──
+    'landlord_name':    "What is the full legal name of the landlord or property management company?",
+    'tenant_name':      "What is the full legal name of the tenant or lessee?",
+    'lease_number':     "What is the lease number or agreement ID?",
+    'property_address': "What is the full street address of the property being leased?",
+    'lease_start_date': "What is the lease commencement or start date? Return in YYYY-MM-DD format.",
+    'lease_end_date':   "What is the lease expiration or end date? Return in YYYY-MM-DD format.",
+    'lease_term_months': "What is the lease term in months? Return as a plain number.",
+    'monthly_rent':     "What is the monthly base rent amount? Return as a plain number.",
+    'security_deposit': "What is the security deposit amount? Return as a plain number.",
+    'payment_due_day':  "What day of the month is rent due? Return as a number (e.g. 1 for the 1st).",
+    'late_fee':         "What is the late payment fee or penalty amount? Return as a plain number.",
+    'total_lease_value': "What is the total lease value over the full term? Return as a plain number.",
 }
 
 
@@ -700,6 +716,10 @@ def run(session, p_doc_type):
 
         if not files:
             continue
+
+        session.sql(
+            f"ALTER SESSION SET QUERY_TAG = 'ai_extract:proc=SP_EXTRACT_BY_DOC_TYPE:doc_type={doc_type}'"
+        ).collect()
 
         # Parse field names from the extraction_prompt
         # Format: "Extract the following fields from this X: field_a, field_b, ... FORMATTING RULES: ..."

@@ -130,7 +130,7 @@ class TestMultiDocTypeSmoke:
             '[data-testid="stSelectboxVirtualDropdown"]'
         ).inner_text().upper()
         page.keyboard.press("Escape")
-        for doc_type in ["INVOICE", "CONTRACT", "RECEIPT", "UTILITY_BILL"]:
+        for doc_type in ["INVOICE", "CONTRACT", "RECEIPT", "UTILITY_BILL", "LEASE"]:
             assert doc_type in dropdown_text, (
                 f"{doc_type} not in doc type dropdown. Options: {dropdown_text}"
             )
@@ -342,7 +342,7 @@ class TestAdminShowsAllTypes:
         options = page.locator('[data-testid="stSelectboxVirtualDropdown"] [role="option"]')
         option_texts = [options.nth(i).inner_text().upper() for i in range(options.count())]
         sb.press("Escape")
-        for doc_type in ["INVOICE", "CONTRACT", "RECEIPT", "UTILITY_BILL"]:
+        for doc_type in ["INVOICE", "CONTRACT", "RECEIPT", "UTILITY_BILL", "LEASE"]:
             assert doc_type in option_texts, (
                 f"{doc_type} not in admin selectbox options: {option_texts}"
             )

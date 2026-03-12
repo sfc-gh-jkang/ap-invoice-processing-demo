@@ -1,6 +1,6 @@
 """
 Page 3: Review & Approve — Inline-editable document table with append-only
-audit trail.
+audit trail. (v2: view-column-based type mapping)
 
 Reads from V_DOCUMENT_SUMMARY (view — instant, no lag), presents an editable
 grid via st.data_editor, highlights pending changes, and INSERTs a new row
@@ -196,10 +196,20 @@ VIEW_COLUMN_ORDER = [
 # Build editable columns list
 EDITABLE_COLS = []
 
+VIEW_COL_TYPES = {
+    "INVOICE_DATE": "DATE",
+    "DUE_DATE": "DATE",
+    "SUBTOTAL": "NUMBER",
+    "TAX_AMOUNT": "NUMBER",
+    "TOTAL_AMOUNT": "NUMBER",
+    "LINE_ITEM_COUNT": "NUMBER",
+    "COMPUTED_LINE_TOTAL": "NUMBER",
+}
+
 for i, view_col in enumerate(VIEW_COLUMN_ORDER):
     fk = f"field_{i+1}"
     label = labels.get(fk, view_col.replace("_", " ").title())
-    ftype = field_types.get(field_key_to_name.get(fk, ""), "VARCHAR")
+    ftype = VIEW_COL_TYPES.get(view_col, "VARCHAR")
 
     if ftype == "DATE":
         column_config[view_col] = st.column_config.DateColumn(label)
@@ -364,7 +374,7 @@ if changed_rows:
             row = edited_df.iloc[idx]
             ref = _norm(row.get("INVOICE_NUMBER")) or _norm(row.get("FILE_NAME"))
             for vc, ext_name in VIEW_TO_EXT.items():
-                ftype = field_types.get(ext_name, "VARCHAR")
+                ftype = VIEW_COL_TYPES.get(vc, "VARCHAR")
                 raw_val = row.get(vc)
                 if raw_val is None or (isinstance(raw_val, float) and pd.isna(raw_val)):
                     continue
@@ -411,7 +421,7 @@ if changed_rows:
             # Build corrections VARIANT JSON using config-driven field mapping
             corrections_dict = {}
             for vc, ext_name in VIEW_TO_EXT.items():
-                ftype = field_types.get(ext_name, "VARCHAR")
+                ftype = VIEW_COL_TYPES.get(vc, "VARCHAR")
                 if ftype == "NUMBER":
                     val = _safe_num(row.get(vc))
                 elif ftype == "DATE":

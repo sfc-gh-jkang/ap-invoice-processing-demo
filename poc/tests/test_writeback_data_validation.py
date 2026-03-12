@@ -239,7 +239,6 @@ class TestCoalesceOverride:
             pytest.skip("No EXTRACTED_FIELDS data to test with")
         record_id, file_name = row
 
-        # Insert and immediately read from view
         sf_cursor.execute(
             "INSERT INTO INVOICE_REVIEW "
             "(record_id, file_name, review_status, corrected_vendor_name, reviewer_notes) "
@@ -247,18 +246,19 @@ class TestCoalesceOverride:
             (record_id, file_name),
         )
 
-        sf_cursor.execute(
-            "SELECT vendor_name FROM V_INVOICE_SUMMARY WHERE record_id = %s",
-            (record_id,),
-        )
-        vendor = sf_cursor.fetchone()[0]
-        assert vendor == "__INSTANT_READ__", (
-            f"View should reflect INSERT instantly, got vendor='{vendor}'"
-        )
-
-        sf_cursor.execute(
-            "DELETE FROM INVOICE_REVIEW WHERE reviewer_notes = '__pytest_instant__'"
-        )
+        try:
+            sf_cursor.execute(
+                "SELECT vendor_name FROM V_INVOICE_SUMMARY WHERE record_id = %s",
+                (record_id,),
+            )
+            vendor = sf_cursor.fetchone()[0]
+            assert vendor == "__INSTANT_READ__", (
+                f"View should reflect INSERT instantly, got vendor='{vendor}'"
+            )
+        finally:
+            sf_cursor.execute(
+                "DELETE FROM INVOICE_REVIEW WHERE reviewer_notes = '__pytest_instant__'"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +414,8 @@ class TestViewJoinCorrectness:
         )
 
     def test_line_item_count_matches_aggregation(self, sf_cursor):
-        """line_item_count should match COUNT(*) from EXTRACTED_TABLE_DATA."""
+        """line_item_count should match COUNT(*) from EXTRACTED_TABLE_DATA
+        when no correction override exists."""
         sf_cursor.execute(
             """
             SELECT COUNT(*) FROM (
@@ -424,6 +425,8 @@ class TestViewJoinCorrectness:
                     COUNT(etd.line_id) AS actual_count
                 FROM V_INVOICE_SUMMARY v
                 LEFT JOIN EXTRACTED_TABLE_DATA etd ON v.file_name = etd.file_name
+                LEFT JOIN INVOICE_REVIEW rv ON v.record_id = rv.record_id
+                WHERE rv.corrections:line_item_count IS NULL
                 GROUP BY v.file_name, v.line_item_count
                 HAVING view_count != actual_count
             )
@@ -435,7 +438,8 @@ class TestViewJoinCorrectness:
         )
 
     def test_computed_line_total_matches_sum(self, sf_cursor):
-        """computed_line_total should match SUM(col_5) from EXTRACTED_TABLE_DATA."""
+        """computed_line_total should match SUM(col_5) from EXTRACTED_TABLE_DATA
+        when no correction override exists."""
         sf_cursor.execute(
             """
             SELECT COUNT(*) FROM (
@@ -445,6 +449,8 @@ class TestViewJoinCorrectness:
                     COALESCE(SUM(etd.col_5), 0) AS actual_total
                 FROM V_INVOICE_SUMMARY v
                 LEFT JOIN EXTRACTED_TABLE_DATA etd ON v.file_name = etd.file_name
+                LEFT JOIN INVOICE_REVIEW rv ON v.record_id = rv.record_id
+                WHERE rv.corrections:computed_line_total IS NULL
                 GROUP BY v.file_name, v.computed_line_total
                 HAVING ABS(COALESCE(view_total, 0) - actual_total) > 0.01
             )
