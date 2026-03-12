@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # deploy_poc.sh — Deploy the AI_EXTRACT POC kit to a Snowflake account
-# Usage: ./poc/deploy_poc.sh [--connection <name>] [--skip-extraction]
+# Usage: ./poc/deploy_poc.sh [--connection <name>] [--skip-extraction] [--first-run]
 #        ./poc/deploy_poc.sh [<connection_name>]
 #        POC_CONNECTION=<name> ./poc/deploy_poc.sh
+#
+# --first-run   Force execution of ACCOUNTADMIN prereqs (01a, 07a, 10_harden).
+#               Required on first deploy; skipped automatically on subsequent runs
+#               when the connection role is not ACCOUNTADMIN.
 set -euo pipefail
 
 # ---------- Parse arguments ----------
 _POSITIONAL_CONNECTION=""
 SKIP_EXTRACTION="${SKIP_EXTRACTION:-false}"
+FIRST_RUN="${FIRST_RUN:-false}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --connection|-c)
@@ -22,9 +27,13 @@ while [[ $# -gt 0 ]]; do
             SKIP_EXTRACTION="true"
             shift
             ;;
+        --first-run)
+            FIRST_RUN="true"
+            shift
+            ;;
         -*)
             echo "Unknown option: $1" >&2
-            echo "Usage: ./poc/deploy_poc.sh [--connection <name>] [--skip-extraction]" >&2
+            echo "Usage: ./poc/deploy_poc.sh [--connection <name>] [--skip-extraction] [--first-run]" >&2
             exit 1
             ;;
         *)
@@ -46,6 +55,14 @@ CONNECTION_FLAG="-c $CONNECTION"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ---------- Detect current role ----------
+CURRENT_ROLE=$(snow sql $CONNECTION_FLAG -q "SELECT CURRENT_ROLE() AS r" --format json 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['R'])" 2>/dev/null || echo "UNKNOWN")
+IS_ACCOUNTADMIN=false
+if [[ "${CURRENT_ROLE}" == "ACCOUNTADMIN" ]]; then
+    IS_ACCOUNTADMIN=true
+fi
 
 # ---------- Helper: run a SQL file with env var substitution ----------
 _sed_substitute() {
@@ -117,10 +134,13 @@ run_sql() {
 
 run_sql_accountadmin() {
     local sql_file="$1"
+    if [[ "${IS_ACCOUNTADMIN}" != "true" && "${FIRST_RUN}" != "true" ]]; then
+        echo "   SKIP: $(basename "$sql_file") (current role is ${CURRENT_ROLE}, not ACCOUNTADMIN — use --first-run to force)"
+        return 0
+    fi
     local tmp_file
     tmp_file=$(mktemp)
     _sed_substitute "$sql_file" "$tmp_file"
-    echo "   (Attempting ACCOUNTADMIN operations — may warn if insufficient privileges)"
     _exec_sql_file "$tmp_file" "false"
     rm -f "$tmp_file"
 }
@@ -134,6 +154,8 @@ echo "  Warehouse:     ${POC_WH}"
 echo "  Compute Pool:  ${POC_POOL}"
 echo "  Role:          ${POC_ROLE}"
 echo "  Connection:    ${CONNECTION}"
+echo "  Current Role:  ${CURRENT_ROLE}"
+echo "  First Run:     ${FIRST_RUN}"
 echo ""
 
 # ---------- Step 1: Create Snowflake objects ----------
