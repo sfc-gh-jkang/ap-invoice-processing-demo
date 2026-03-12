@@ -7,25 +7,32 @@ Optional USD estimate via configurable credit rate in sidebar.
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from config import DB, get_session, inject_custom_css, sidebar_branding
+from config import DB, get_session, inject_custom_css, sidebar_branding, get_demo_config
 
 st.set_page_config(page_title="Cost Observability", page_icon="💰", layout="wide")
 
 inject_custom_css()
+session = get_session()
+demo_cfg = get_demo_config(session)
+
 with st.sidebar:
-    sidebar_branding()
+    sidebar_branding(customer_name=demo_cfg.get("customer_name"))
     st.divider()
+    demo_mode = st.toggle(
+        "Demo Mode",
+        value=demo_cfg.get("demo_mode", False),
+        help="Hide raw credit numbers for customer-facing presentations.",
+    )
     credit_rate = st.number_input(
         "Credit Rate (USD)", min_value=0.00, value=0.00, step=0.50,
-        help="Set your contract's $/credit rate to see USD estimates. Leave 0 to show credits only."
+        help="Set your contract's $/credit rate to see USD estimates. Leave 0 to show credits only.",
+        disabled=demo_mode,
     )
 
-show_usd = credit_rate > 0
+show_usd = credit_rate > 0 and not demo_mode
 
 st.title("Cost Observability")
 st.caption("AI_EXTRACT credit consumption from Snowflake first-party billing")
-
-session = get_session()
 
 day_range = st.selectbox("Time Range", [7, 14, 30, 90], index=2, format_func=lambda d: f"Last {d} days")
 
@@ -258,6 +265,91 @@ try:
         st.info("No cost attribution data. Run `sql/13_cost_attribution.sql` to set up per-PDF tracking.")
 except Exception as e:
     st.warning(f"Could not load cost drivers: {e}")
+
+st.divider()
+
+# --- Cost vs Confidence: Quality-Cost Tradeoff ---
+st.subheader("Cost vs Confidence — Quality-Cost Tradeoff")
+st.caption("Do higher-cost extractions produce higher-confidence results?")
+try:
+    cost_conf = session.sql(f"""
+        WITH conf AS (
+            SELECT
+                e.file_name,
+                r.doc_type,
+                e.raw_extraction:_confidence AS conf_json,
+                ARRAY_SIZE(OBJECT_KEYS(e.raw_extraction:_confidence)) AS n_fields
+            FROM {DB}.EXTRACTED_FIELDS e
+            JOIN {DB}.RAW_DOCUMENTS r ON e.file_name = r.file_name
+            WHERE e.raw_extraction:_confidence IS NOT NULL
+        ),
+        conf_avg AS (
+            SELECT
+                file_name,
+                doc_type,
+                n_fields,
+                -- avg of all confidence values in the JSON object
+                (SELECT AVG(v.value::FLOAT)
+                 FROM TABLE(FLATTEN(input => conf_json)) v
+                ) AS avg_confidence
+            FROM conf
+        )
+        SELECT
+            ca.file_name,
+            ca.doc_type,
+            ca.avg_confidence,
+            ca.n_fields,
+            cp.ai_credits,
+            cp.tokens,
+            cp.page_count
+        FROM conf_avg ca
+        LEFT JOIN {DB}.V_AI_EXTRACT_COST_PER_PDF cp ON ca.file_name = cp.file_name
+        WHERE cp.ai_credits IS NOT NULL
+        LIMIT 500
+    """).to_pandas()
+    if len(cost_conf) > 0:
+        cc1, cc2, cc3 = st.columns(3)
+        avg_conf = cost_conf["AVG_CONFIDENCE"].mean()
+        low_conf_count = len(cost_conf[cost_conf["AVG_CONFIDENCE"] < 0.7])
+        cc1.metric("Avg Confidence", f"{avg_conf:.2f}")
+        cc2.metric("Low Confidence Docs", f"{low_conf_count}", help="Documents with avg confidence < 0.7")
+        cc3.metric("Docs with Scores", f"{len(cost_conf):,}")
+
+        col_cc1, col_cc2 = st.columns(2)
+        with col_cc1:
+            fig_cc = px.scatter(
+                cost_conf, x="AVG_CONFIDENCE", y="AI_CREDITS", color="DOC_TYPE",
+                size="TOKENS",
+                hover_data=["FILE_NAME", "TOKENS", "PAGE_COUNT"],
+                labels={"AVG_CONFIDENCE": "Avg Confidence", "AI_CREDITS": "Credits", "DOC_TYPE": "Doc Type"},
+                title="Confidence vs Credits",
+                color_discrete_sequence=["#29B5E8", "#11567F", "#FF4B4B", "#FFA726", "#66BB6A"],
+            )
+            fig_cc.update_layout(height=350, margin=dict(l=20, r=20, t=40, b=20))
+            st.plotly_chart(fig_cc, use_container_width=True)
+        with col_cc2:
+            conf_by_type = cost_conf.groupby("DOC_TYPE").agg(
+                avg_confidence=("AVG_CONFIDENCE", "mean"),
+                avg_credits=("AI_CREDITS", "mean"),
+                doc_count=("FILE_NAME", "count"),
+            ).reset_index()
+            conf_by_type.columns = ["Doc Type", "Avg Confidence", "Avg Credits", "Docs"]
+            st.dataframe(
+                conf_by_type, hide_index=True, use_container_width=True,
+                column_config={
+                    "Avg Confidence": st.column_config.NumberColumn(format="%.3f"),
+                    "Avg Credits": st.column_config.NumberColumn(format="%.6f"),
+                },
+            )
+            st.markdown("""
+**Insight:** If confidence is uniformly high across doc types, the extraction
+quality is consistent regardless of cost. Low-confidence documents may benefit
+from re-extraction or prompt tuning — check the Review page for flagged fields.
+""")
+    else:
+        st.info("No confidence data available. Run `CALL SP_EXTRACT_BY_DOC_TYPE('ALL')` to populate confidence scores.")
+except Exception as e:
+    st.warning(f"Could not load confidence data: {e}")
 
 st.divider()
 

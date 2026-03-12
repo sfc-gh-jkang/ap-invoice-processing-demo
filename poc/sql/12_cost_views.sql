@@ -17,12 +17,8 @@
 --
 -- Prerequisites:
 --   GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE AI_EXTRACT_APP;
---   (requires ACCOUNTADMIN — see Step 0 below)
+--   (handled by 10_harden.sql)
 -- =============================================================================
-
--- Step 0: Grant ACCOUNT_USAGE access (must be ACCOUNTADMIN)
-USE ROLE ACCOUNTADMIN;
-GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE AI_EXTRACT_APP;
 
 USE ROLE AI_EXTRACT_APP;
 USE DATABASE AI_EXTRACT_POC;

@@ -1,11 +1,12 @@
 -- =============================================================================
--- 07_deploy_streamlit.sql — Deploy the Streamlit Dashboard
+-- 07_deploy_streamlit.sql — Deploy the Streamlit Dashboard (AI_EXTRACT_APP)
 --
--- This creates:
---   1. A stage for Streamlit app files
---   2. A compute pool for Container Runtime
---   3. The Streamlit app itself
+-- This file contains ONLY statements that run under AI_EXTRACT_APP:
+--   1. Create stage for Streamlit app files
+--   2. Create the Streamlit app (Container Runtime)
 --
+-- ACCOUNTADMIN prerequisites (compute pool, EAI, grants) are handled
+-- separately by 07a_streamlit_prereqs.sql or by deploy_poc.sh.
 -- Run this AFTER extraction is working (scripts 01-05).
 -- =============================================================================
 
@@ -22,71 +23,7 @@ CREATE STAGE IF NOT EXISTS STREAMLIT_STAGE
     COMMENT = 'Stage for Streamlit in Snowflake app files';
 
 -- ---------------------------------------------------------------------------
--- Step 2: Upload Streamlit files
--- ---------------------------------------------------------------------------
--- Upload the streamlit/ folder contents from this POC kit.
---
--- OPTION A: Snowflake CLI
---   snow stage copy streamlit/streamlit_app.py  @STREAMLIT_STAGE/  --overwrite
---   snow stage copy streamlit/config.py         @STREAMLIT_STAGE/  --overwrite
---   snow stage copy streamlit/pyproject.toml    @STREAMLIT_STAGE/  --overwrite
---   snow stage copy streamlit/environment.yml   @STREAMLIT_STAGE/  --overwrite
---   snow stage copy streamlit/pages/            @STREAMLIT_STAGE/pages/ --overwrite
---
--- OPTION B: SnowSQL
---   PUT file://streamlit/streamlit_app.py  @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
---   PUT file://streamlit/config.py         @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
---   PUT file://streamlit/pyproject.toml    @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
---   PUT file://streamlit/environment.yml   @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
---   PUT file://streamlit/pages/*.py        @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
---
--- OPTION C: Snowsight UI
---   Navigate to the STREAMLIT_STAGE and upload files via drag-and-drop.
-
--- Verify uploads
-SELECT * FROM DIRECTORY(@STREAMLIT_STAGE) ORDER BY RELATIVE_PATH;
-
--- ---------------------------------------------------------------------------
--- Step 3: Create compute pool (required for Container Runtime)
--- ---------------------------------------------------------------------------
-CREATE COMPUTE POOL IF NOT EXISTS AI_EXTRACT_POC_POOL
-    MIN_NODES = 1
-    MAX_NODES = 1
-    INSTANCE_FAMILY = CPU_X64_XS
-    AUTO_SUSPEND_SECS = 300
-    AUTO_RESUME = TRUE
-    COMMENT = 'Compute pool for AI_EXTRACT POC Streamlit app';
-
--- ---------------------------------------------------------------------------
--- Step 4: Create External Access Integration (required for pip packages)
--- ---------------------------------------------------------------------------
--- Container Runtime needs network access to install packages from PyPI.
--- This requires ACCOUNTADMIN.
-
-USE ROLE ACCOUNTADMIN;
-
-CREATE NETWORK RULE IF NOT EXISTS PYPI_NETWORK_RULE
-    TYPE = 'HOST_PORT'
-    MODE = 'EGRESS'
-    VALUE_LIST = ('pypi.org', 'files.pythonhosted.org');
-
-CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS PYPI_ACCESS_INTEGRATION
-    ALLOWED_NETWORK_RULES = (PYPI_NETWORK_RULE)
-    ENABLED = TRUE
-    COMMENT = 'Allow pip install from PyPI for Container Runtime';
-
--- Switch back to POC role for app creation
--- Grant the POC role access to the EAI and compute pool
-GRANT USAGE ON INTEGRATION PYPI_ACCESS_INTEGRATION TO ROLE AI_EXTRACT_APP;
-GRANT USAGE ON COMPUTE POOL AI_EXTRACT_POC_POOL TO ROLE AI_EXTRACT_APP;
-GRANT BIND SERVICE ENDPOINT ON ACCOUNT TO ROLE AI_EXTRACT_APP;
-
-USE ROLE AI_EXTRACT_APP;
-USE DATABASE AI_EXTRACT_POC;
-USE SCHEMA DOCUMENTS;
-
--- ---------------------------------------------------------------------------
--- Step 5: Create the Streamlit app
+-- Step 2: Create the Streamlit app (Container Runtime)
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE STREAMLIT AI_EXTRACT_DASHBOARD
     FROM '@AI_EXTRACT_POC.DOCUMENTS.STREAMLIT_STAGE'
@@ -98,17 +35,7 @@ CREATE OR REPLACE STREAMLIT AI_EXTRACT_DASHBOARD
     TITLE = 'AI_EXTRACT Document Processing'
     COMMENT = 'Document extraction dashboard powered by Cortex AI_EXTRACT';
 
--- Activate the app (required for FROM-based Streamlit objects)
+ALTER STREAMLIT AI_EXTRACT_DASHBOARD DROP LIVE VERSION;
 ALTER STREAMLIT AI_EXTRACT_DASHBOARD ADD LIVE VERSION FROM LAST;
 
--- ---------------------------------------------------------------------------
--- Step 6: Grant access (optional — for other users in your account)
--- ---------------------------------------------------------------------------
--- GRANT USAGE ON STREAMLIT AI_EXTRACT_DASHBOARD TO ROLE <target_role>;
-
--- ---------------------------------------------------------------------------
--- Open the app
--- ---------------------------------------------------------------------------
--- Navigate to Snowsight > Projects > Streamlit > AI_EXTRACT_DASHBOARD
--- Or use: SHOW STREAMLITS;
 SHOW STREAMLITS LIKE 'AI_EXTRACT_DASHBOARD';

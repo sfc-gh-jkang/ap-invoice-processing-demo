@@ -1,7 +1,0 @@
-name: sf_env
-channels:
-  - snowflake
-dependencies:
-  - streamlit>=1.37.0
-  - plotly
-  - pypdfium2

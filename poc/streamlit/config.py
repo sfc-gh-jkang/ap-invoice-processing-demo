@@ -75,13 +75,14 @@ def inject_custom_css():
     st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
 
 
-def sidebar_branding():
+def sidebar_branding(customer_name: str | None = None):
     """Render branded sidebar header. Call inside `with st.sidebar:`."""
+    subtitle = customer_name or "Document Processing POC"
     st.markdown(
         '<div class="brand-header">'
         '<span style="font-size:1.6rem;">&#10052;</span><br>'
         '<strong style="font-size:1.1rem; color:#29B5E8;">AI_EXTRACT</strong><br>'
-        '<span style="font-size:0.75rem; color:#8a94a6;">Document Processing POC</span>'
+        f'<span style="font-size:0.75rem; color:#8a94a6;">{subtitle}</span>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -145,6 +146,29 @@ _DEFAULT_LABELS = {
 def get_session():
     """Return the active Snowpark session."""
     return _init_session()
+
+
+def get_demo_config(session) -> dict:
+    """Read optional DEMO_CONFIG table for customer-facing demo settings.
+
+    Returns dict with keys: customer_name, demo_mode, hide_credits.
+    Falls back to safe defaults if table doesn't exist.
+    """
+    defaults = {"customer_name": None, "demo_mode": False, "hide_credits": False}
+    try:
+        rows = session.sql(
+            f"SELECT * FROM {DB}.DEMO_CONFIG LIMIT 1"
+        ).collect()
+        if rows:
+            row = rows[0]
+            return {
+                "customer_name": _safe_get(row, "CUSTOMER_NAME"),
+                "demo_mode": bool(_safe_get(row, "DEMO_MODE", False)),
+                "hide_credits": bool(_safe_get(row, "HIDE_CREDITS", False)),
+            }
+    except Exception:
+        pass
+    return defaults
 
 
 def get_doc_type_labels(session, doc_type: str = "INVOICE") -> dict:

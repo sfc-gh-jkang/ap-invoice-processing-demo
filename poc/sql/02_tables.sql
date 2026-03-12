@@ -12,8 +12,8 @@
 -- of fields works without schema changes.
 -- =============================================================================
 
-USE ROLE AI_EXTRACT_APP;          -- <-- match your 01_setup.sql role
-USE DATABASE AI_EXTRACT_POC;      -- <-- match your 01_setup.sql values
+USE ROLE AI_EXTRACT_APP;
+USE DATABASE AI_EXTRACT_POC;
 USE SCHEMA DOCUMENTS;
 USE WAREHOUSE AI_EXTRACT_WH;
 

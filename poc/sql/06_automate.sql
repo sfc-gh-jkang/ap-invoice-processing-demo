@@ -166,6 +166,8 @@ BEGIN
     WHERE extracted = FALSE
       AND file_name IN (SELECT file_name FROM EXTRACTED_FIELDS);
 
+    CALL SP_POPULATE_DOC_METADATA();
+
     RETURN 'Processed ' || :files_processed || ' new document(s)';
 END;
 $$;
@@ -853,6 +855,8 @@ def run(session, p_doc_type):
                     "UPDATE RAW_DOCUMENTS SET extraction_error = ? WHERE file_name = ?",
                     params=[str(e)[:500], fname]
                 ).collect()
+
+    session.sql("CALL SP_POPULATE_DOC_METADATA()").collect()
 
     return f"Processed {total_processed} document(s) via config-driven extraction"
 $$;

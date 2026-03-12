@@ -151,5 +151,8 @@ vendor, time period, and line items
 
 **Review & Approve** — Review extracted invoices
 and record approval decisions
+
+**Cost** — AI_EXTRACT credit usage, per-PDF
+cost attribution, and confidence-cost tradeoff
 """
     )
