@@ -80,11 +80,6 @@ class TestStreamlitStage:
         rows = sf_cursor.fetchall()
         assert len(rows) >= 1, "config.py not found in stage"
 
-    def test_stage_has_environment_yml(self, sf_cursor):
-        sf_cursor.execute(f"LIST @{FQ}.STREAMLIT_STAGE/environment.yml")
-        rows = sf_cursor.fetchall()
-        assert len(rows) >= 1, "environment.yml not found in stage"
-
     def test_stage_has_pyproject_toml(self, sf_cursor):
         sf_cursor.execute(f"LIST @{FQ}.STREAMLIT_STAGE/pyproject.toml")
         rows = sf_cursor.fetchall()
@@ -101,6 +96,7 @@ class TestStreamlitStage:
         "2_Analytics.py",
         "3_Review.py",
         "4_Admin.py",
+        "5_Cost.py",
     ])
     def test_stage_has_page(self, sf_cursor, page):
         sf_cursor.execute(f"LIST @{FQ}.STREAMLIT_STAGE/pages/{page}")
@@ -362,22 +358,28 @@ class TestDeployScriptCompleteness:
 
 
 # ---------------------------------------------------------------------------
-# 7. Environment.yml validation
+# 7. pyproject.toml local file validation (Container Runtime)
 # ---------------------------------------------------------------------------
-class TestEnvironmentYml:
-    """Verify environment.yml has required packages."""
+class TestPyprojectTomlLocal:
+    """Verify pyproject.toml exists locally (environment.yml was removed)."""
 
-    ENV_YML = os.path.join(
-        os.path.dirname(__file__), "..", "streamlit", "environment.yml"
+    PYPROJECT = os.path.join(
+        os.path.dirname(__file__), "..", "streamlit", "pyproject.toml"
     )
 
-    def test_environment_yml_exists(self):
-        assert os.path.exists(self.ENV_YML), "environment.yml not found"
+    def test_pyproject_toml_exists(self):
+        assert os.path.exists(self.PYPROJECT), (
+            "pyproject.toml not found. Container Runtime requires pyproject.toml."
+        )
 
-    def test_has_streamlit_dependency(self):
-        with open(self.ENV_YML) as f:
-            content = f.read()
-        assert "streamlit" in content.lower(), "environment.yml missing streamlit"
+    def test_no_environment_yml(self):
+        env_yml = os.path.join(
+            os.path.dirname(__file__), "..", "streamlit", "environment.yml"
+        )
+        assert not os.path.exists(env_yml), (
+            "environment.yml still exists — it was replaced by pyproject.toml "
+            "for Container Runtime. Delete it to avoid confusion."
+        )
 
 
 # ---------------------------------------------------------------------------
