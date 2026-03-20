@@ -38,6 +38,11 @@ if "line_save_result" not in st.session_state:
 
 st.title("Review & Approve")
 st.caption("Edit any cell directly in the table, then save all changes at once")
+st.info(
+    "**Note:** Documents are identified by **filename**. "
+    "Re-uploading a file with the same name overwrites the extraction but preserves review corrections. "
+    "If you need to track a different document, ensure the filename is unique."
+)
 
 # ── Post-save confirmation ───────────────────────────────────────────────────
 if st.session_state.save_result:

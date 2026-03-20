@@ -109,7 +109,7 @@ upload-streamlit: ## Re-upload Streamlit files to STREAMLIT_STAGE (after code ch
 	  PUT file://streamlit/streamlit_app.py @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
 	  PUT file://streamlit/config.py @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
 	  PUT file://streamlit/pyproject.toml @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
-	  PUT file://streamlit/environment.yml @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
+    PUT file://streamlit/snowflake.yml @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
 	  PUT file://streamlit/pages/0_Dashboard.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
 	  PUT file://streamlit/pages/1_Document_Viewer.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \
 	  PUT file://streamlit/pages/2_Analytics.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE; \

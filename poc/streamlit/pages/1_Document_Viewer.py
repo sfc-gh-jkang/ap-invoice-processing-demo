@@ -31,6 +31,11 @@ if "line_save_result" not in st.session_state:
 
 st.title("Document Viewer")
 st.caption("Browse extracted documents — select any row to view source PDF and extracted fields")
+st.info(
+    "**Note:** Documents are identified by **filename**. "
+    "If the same filename is uploaded again, the existing extraction is overwritten (MERGE). "
+    "Rename the file before uploading if it is a different document."
+)
 
 
 # ---------------------------------------------------------------------------
