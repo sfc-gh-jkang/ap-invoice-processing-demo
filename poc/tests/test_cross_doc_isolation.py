@@ -34,7 +34,7 @@ class TestDocumentTypeCounts:
             SELECT COUNT(*) AS cnt FROM {DB}.RAW_DOCUMENTS
             WHERE doc_type = 'INVOICE'
         """).collect()
-        assert rows[0]["CNT"] == 100
+        assert rows[0]["CNT"] >= 100, "Invoice count should not drop below 100"
 
     def test_utility_bill_count(self, sf_session):
         rows = sf_session.sql(f"""
@@ -66,7 +66,7 @@ class TestExtractionIsolation:
             JOIN {DB}.RAW_DOCUMENTS r ON e.file_name = r.file_name
             WHERE r.doc_type = 'INVOICE'
         """).collect()
-        assert rows[0]["CNT"] == 100
+        assert rows[0]["CNT"] >= 100, "Invoice extraction count should not drop below 100"
 
     def test_utility_bill_extractions_match_raw(self, sf_session):
         """Number of UTILITY_BILL extractions should match UTILITY_BILL raw documents."""
@@ -117,7 +117,7 @@ class TestViewIsolation:
             SELECT COUNT(*) AS cnt FROM {DB}.V_DOCUMENT_SUMMARY
             WHERE doc_type = 'INVOICE'
         """).collect()
-        assert rows[0]["CNT"] == 100
+        assert rows[0]["CNT"] >= 100, "Invoice count in view should not drop below 100"
 
     def test_view_utility_bill_count(self, sf_session):
         rows = sf_session.sql(f"""

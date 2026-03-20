@@ -41,8 +41,8 @@ class TestCostDailyView:
     def test_columns_present(self, sf_cursor):
         sf_cursor.execute(f"DESCRIBE VIEW {self.VIEW}")
         cols = {row[0].upper() for row in sf_cursor.fetchall()}
-        for expected in ("USAGE_DATE", "TOTAL_CREDITS", "COMPUTE_CREDITS",
-                         "CLOUD_SERVICES_CREDITS", "QUERY_COUNT"):
+        for expected in ("USAGE_DATE", "AI_EXTRACT_CREDITS", "AI_EXTRACT_CALLS",
+                         "TOTAL_TOKENS", "DOCS_EXTRACTED", "WAREHOUSE_CREDITS"):
             assert expected in cols, f"Missing column: {expected}"
 
     def test_returns_rows(self, sf_cursor):
@@ -59,8 +59,8 @@ class TestCostByDocTypeView:
     def test_columns_present(self, sf_cursor):
         sf_cursor.execute(f"DESCRIBE VIEW {self.VIEW}")
         cols = {row[0].upper() for row in sf_cursor.fetchall()}
-        for expected in ("DOC_TYPE", "USAGE_DATE", "QUERY_COUNT",
-                         "CLOUD_CREDITS", "TOTAL_ELAPSED_SEC", "AVG_ELAPSED_SEC"):
+        for expected in ("DOC_TYPE", "USAGE_DATE", "CALL_COUNT",
+                         "AI_EXTRACT_CREDITS", "TOTAL_ELAPSED_SEC", "AVG_ELAPSED_SEC"):
             assert expected in cols, f"Missing column: {expected}"
 
     def test_returns_rows(self, sf_cursor):
@@ -77,8 +77,8 @@ class TestCostPerDocumentView:
     def test_columns_present(self, sf_cursor):
         sf_cursor.execute(f"DESCRIBE VIEW {self.VIEW}")
         cols = {row[0].upper() for row in sf_cursor.fetchall()}
-        for expected in ("USAGE_DATE", "TOTAL_CREDITS", "DOCS_EXTRACTED",
-                         "CREDITS_PER_DOCUMENT", "ESTIMATED_COST_PER_DOC_USD"):
+        for expected in ("USAGE_DATE", "AI_EXTRACT_CREDITS", "DOCS_EXTRACTED",
+                         "CREDITS_PER_DOC", "AI_EXTRACT_CALLS"):
             assert expected in cols, f"Missing column: {expected}"
 
     def test_returns_rows(self, sf_cursor):
@@ -95,8 +95,8 @@ class TestQueryLogView:
     def test_columns_present(self, sf_cursor):
         sf_cursor.execute(f"DESCRIBE VIEW {self.VIEW}")
         cols = {row[0].upper() for row in sf_cursor.fetchall()}
-        for expected in ("QUERY_ID", "QUERY_TAG", "DOC_TYPE", "SOURCE_PROC",
-                         "START_TIME", "ELAPSED_SEC", "CLOUD_CREDITS"):
+        for expected in ("QUERY_ID", "DOC_TYPE", "AI_CREDITS",
+                         "START_TIME", "ELAPSED_SEC", "TOKENS"):
             assert expected in cols, f"Missing column: {expected}"
 
     def test_returns_rows(self, sf_cursor):
@@ -113,9 +113,9 @@ class TestCostSummaryView:
     def test_columns_present(self, sf_cursor):
         sf_cursor.execute(f"DESCRIBE VIEW {self.VIEW}")
         cols = {row[0].upper() for row in sf_cursor.fetchall()}
-        for expected in ("CREDITS_LAST_7D", "CREDITS_LAST_30D",
-                         "CREDITS_LAST_90D", "TOTAL_DOCS",
-                         "AVG_CREDITS_PER_DOC", "AVG_COST_PER_DOC_USD"):
+        for expected in ("AI_CREDITS_LAST_7D", "AI_CREDITS_LAST_30D",
+                         "AI_CREDITS_LAST_90D", "UNIQUE_DOCS",
+                         "AVG_CREDITS_PER_DOC"):
             assert expected in cols, f"Missing column: {expected}"
 
     def test_returns_one_row(self, sf_cursor):
@@ -123,18 +123,18 @@ class TestCostSummaryView:
         assert sf_cursor.fetchone()[0] == 1
 
     def test_total_docs_matches_extracted_count(self, sf_cursor):
-        sf_cursor.execute(f"SELECT TOTAL_DOCS FROM {self.VIEW}")
+        sf_cursor.execute(f"SELECT UNIQUE_DOCS FROM {self.VIEW}")
         summary_count = sf_cursor.fetchone()[0]
         sf_cursor.execute(
-            "SELECT COUNT(*) FROM RAW_DOCUMENTS WHERE extracted = TRUE"
+            "SELECT COUNT(DISTINCT file_name) FROM EXTRACTED_FIELDS"
         )
         actual_count = sf_cursor.fetchone()[0]
         assert summary_count == actual_count, (
             f"Summary shows {summary_count} but {actual_count} actually extracted"
         )
 
-    def test_avg_cost_per_doc_nonnegative(self, sf_cursor):
-        sf_cursor.execute(f"SELECT AVG_COST_PER_DOC_USD FROM {self.VIEW}")
+    def test_avg_credits_per_doc_nonnegative(self, sf_cursor):
+        sf_cursor.execute(f"SELECT AVG_CREDITS_PER_DOC FROM {self.VIEW}")
         val = sf_cursor.fetchone()[0]
         if val is not None:
             assert float(val) >= 0
@@ -145,13 +145,13 @@ class TestCostViewsIntegrity:
 
     def test_daily_credits_sum_matches_summary_30d(self, sf_cursor):
         sf_cursor.execute("""
-            SELECT COALESCE(SUM(TOTAL_CREDITS), 0)
+            SELECT COALESCE(SUM(AI_EXTRACT_CREDITS), 0)
             FROM V_AI_EXTRACT_COST_DAILY
             WHERE USAGE_DATE >= DATEADD('day', -30, CURRENT_DATE())
         """)
         daily_sum = float(sf_cursor.fetchone()[0])
         sf_cursor.execute(
-            "SELECT COALESCE(CREDITS_LAST_30D, 0) FROM V_AI_EXTRACT_COST_SUMMARY"
+            "SELECT COALESCE(AI_CREDITS_LAST_30D, 0) FROM V_AI_EXTRACT_COST_SUMMARY"
         )
         summary_30d = float(sf_cursor.fetchone()[0])
         if daily_sum > 0 and summary_30d > 0:

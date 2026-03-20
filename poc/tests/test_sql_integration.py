@@ -98,7 +98,8 @@ class TestTables:
         )
         cols = [row[0] for row in sf_cursor.fetchall()]
         expected = ["FILE_NAME", "FILE_PATH", "DOC_TYPE", "STAGED_AT",
-                    "EXTRACTED", "EXTRACTED_AT", "EXTRACTION_ERROR"]
+                    "EXTRACTED", "EXTRACTED_AT", "EXTRACTION_ERROR",
+                    "PAGE_COUNT", "FILE_SIZE_BYTES"]
         assert cols == expected
 
     def test_raw_documents_doc_type_default(self, sf_cursor):

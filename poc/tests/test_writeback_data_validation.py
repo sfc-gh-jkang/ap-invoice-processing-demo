@@ -425,8 +425,11 @@ class TestViewJoinCorrectness:
                     COUNT(etd.line_id) AS actual_count
                 FROM V_INVOICE_SUMMARY v
                 LEFT JOIN EXTRACTED_TABLE_DATA etd ON v.file_name = etd.file_name
-                LEFT JOIN INVOICE_REVIEW rv ON v.record_id = rv.record_id
-                WHERE rv.corrections:line_item_count IS NULL
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM INVOICE_REVIEW rv
+                    WHERE rv.record_id = v.record_id
+                      AND rv.corrections:line_item_count IS NOT NULL
+                )
                 GROUP BY v.file_name, v.line_item_count
                 HAVING view_count != actual_count
             )
@@ -449,8 +452,11 @@ class TestViewJoinCorrectness:
                     COALESCE(SUM(etd.col_5), 0) AS actual_total
                 FROM V_INVOICE_SUMMARY v
                 LEFT JOIN EXTRACTED_TABLE_DATA etd ON v.file_name = etd.file_name
-                LEFT JOIN INVOICE_REVIEW rv ON v.record_id = rv.record_id
-                WHERE rv.corrections:computed_line_total IS NULL
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM INVOICE_REVIEW rv
+                    WHERE rv.record_id = v.record_id
+                      AND rv.corrections:computed_line_total IS NOT NULL
+                )
                 GROUP BY v.file_name, v.computed_line_total
                 HAVING ABS(COALESCE(view_total, 0) - actual_total) > 0.01
             )

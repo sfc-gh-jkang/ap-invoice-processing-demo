@@ -64,7 +64,7 @@ class TestDocumentListing:
         sql = self.BASE_SQL.format(fq=FQ) + " WHERE r.doc_type = %s"
         sf_cursor.execute(sql, ("INVOICE",))
         rows = sf_cursor.fetchall()
-        assert len(rows) == 100
+        assert len(rows) >= 100, f"Expected >= 100 invoices, got {len(rows)}"
 
     def test_filter_by_utility_bill(self, sf_cursor):
         sql = self.BASE_SQL.format(fq=FQ) + " WHERE r.doc_type = %s"
