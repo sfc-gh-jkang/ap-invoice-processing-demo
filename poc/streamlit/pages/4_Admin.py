@@ -241,7 +241,7 @@ if configs:
                             test_fname = f"_test_{selected_type}_{test_file.name}"
                             session.file.put_stream(
                                 test_file, f"@{DB}.DOCUMENT_STAGE/{test_fname}",
-                                auto_compress=False, overwrite=True,
+                                compress_data=False, overwrite=True,
                             )
                             # Build a simple extraction call
                             prompt = cfg.get("extraction_prompt", "")
