@@ -443,7 +443,7 @@ WHERE ln.index = pr.index
 
 ## Deploying the Dashboard
 
-The `streamlit/` folder contains a 3-page Streamlit in Snowflake app. Deployment is optional but gives you an interactive way to explore results.
+The `streamlit/` folder contains a 6-page Streamlit in Snowflake app (Dashboard, Document Viewer, Analytics, Review, Admin, Cost). Deployment is optional but gives you an interactive way to explore results.
 
 ### Prerequisites for Dashboard
 
@@ -459,7 +459,7 @@ The `streamlit/` folder contains a 3-page Streamlit in Snowflake app. Deployment
    # Snowflake CLI
    snow stage copy streamlit/streamlit_app.py @STREAMLIT_STAGE/ --overwrite
    snow stage copy streamlit/config.py       @STREAMLIT_STAGE/ --overwrite
-   snow stage copy streamlit/environment.yml @STREAMLIT_STAGE/ --overwrite
+   snow stage copy streamlit/snowflake.yml @STREAMLIT_STAGE/ --overwrite
    snow stage copy streamlit/pages/          @STREAMLIT_STAGE/pages/ --overwrite
    ```
 
@@ -480,6 +480,8 @@ The `streamlit/` folder contains a 3-page Streamlit in Snowflake app. Deployment
 | **Document Viewer** | Filter by sender/status, browse documents, drill down to see extracted fields alongside the rendered source PDF |
 | **Analytics** | Bar chart by sender, monthly trend area chart, aging distribution, top 20 line items |
 | **Review** | Inline `st.data_editor` for reviewing/correcting extracted data, append-only audit trail, writeback to `INVOICE_REVIEW` |
+| **Admin** | Document type config management, add/edit/delete document types via UI builder, test extraction on single files with save-to-Snowflake capability |
+| **Cost** | Cost observability: credit consumption trends, token usage analysis, per-document cost drivers |
 
 ### Updating the Deployed App
 
@@ -496,7 +498,7 @@ snow sql -c my_account -q "
   USE SCHEMA DOCUMENTS;
   PUT file://streamlit/streamlit_app.py @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
   PUT file://streamlit/config.py @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
-  PUT file://streamlit/environment.yml @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+  PUT file://streamlit/snowflake.yml @STREAMLIT_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
   PUT file://streamlit/pages/*.py @STREAMLIT_STAGE/pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 "
 ```
@@ -702,8 +704,26 @@ The POC supports multiple document types (invoices, contracts, receipts, or any 
 | `INVOICE` | Invoice | Vendor Name, Invoice #, PO #, Invoice Date, Due Date, Payment Terms, Recipient, Subtotal, Tax, Total |
 | `CONTRACT` | Contract | Party Name, Contract #, Reference ID, Effective Date, Expiration Date, Terms, Counterparty, Base Value, Adjustments, Total Value |
 | `RECEIPT` | Receipt | Merchant Name, Receipt #, Transaction ID, Purchase Date, Return By Date, Payment Method, Buyer, Subtotal, Tax, Total Paid |
+| `LEASE` | Lease | Landlord, Lease #, Property ID, Start Date, End Date, Terms, Tenant, Monthly Rent, Deposit, Total Value |
+| `UTILITY_BILL` | Utility Bill | Utility Provider, Account #, Meter ID, Bill Date, Due Date, Rate Plan, Service Address, Previous Balance, Current Charges, Total Due |
 
 ### Adding a Custom Document Type
+
+**Option A — Admin UI (recommended):**
+
+The **Admin** page provides an interactive builder for creating new document types without writing SQL:
+
+1. Navigate to the **Admin** page in the Streamlit app
+2. Select **"Add New Document Type"** in the Config Management section
+3. Fill in the document type code (e.g., `PURCHASE_ORDER`) and display name
+4. Define your 10 extraction fields with labels and data types
+5. Optionally configure table extraction columns for line-item data
+6. Preview the generated extraction prompt and field label JSON
+7. Click **Save** to insert the configuration into `DOCUMENT_TYPE_CONFIG`
+
+The builder generates the extraction prompt, field labels, field types, review fields, and table column schema automatically.
+
+**Option B — Direct SQL:**
 
 ```sql
 INSERT INTO DOCUMENT_TYPE_CONFIG (doc_type, display_name, extraction_prompt, field_labels)
@@ -754,6 +774,28 @@ The `field_labels` column stores a JSON object with these keys:
 | `reference_label` | Label for the primary reference number | Dashboard, Viewer |
 | `secondary_ref_label` | Label for a secondary reference | Dashboard |
 
+### Test Extraction with Save
+
+The **Admin** page includes a **Test Extraction** section that lets you validate AI_EXTRACT against a single staged file before running batch extraction:
+
+1. Select a document type configuration and a staged file
+2. Click **Run Extraction** to execute AI_EXTRACT with the selected config's prompts
+3. Preview the extracted header fields with confidence scores and the line-item table
+4. Click **Save to Snowflake** to persist the results via MERGE into `RAW_DOCUMENTS`, `EXTRACTED_FIELDS`, and `EXTRACTED_TABLE_DATA`
+
+Saving uses MERGE (not INSERT), so re-extracting and saving the same file updates the existing records rather than creating duplicates. The `record_id` in `EXTRACTED_FIELDS` is preserved, keeping downstream review links intact.
+
+### Filename-Based Document Identity
+
+Documents are identified by **filename only** across all tables (`RAW_DOCUMENTS`, `EXTRACTED_FIELDS`, `EXTRACTED_TABLE_DATA`). The `file_name` column serves as the effective primary key.
+
+**Implications:**
+- Uploading a file with the same name as an existing document **overwrites** the stage file and **updates** the extraction results (MERGE)
+- Review corrections linked to that document (in `INVOICE_REVIEW` / `LINE_ITEM_REVIEW`) are preserved
+- To add a truly different document, ensure the filename is unique before uploading
+
+The Streamlit app displays warnings about this behavior on the Admin (upload), Document Viewer, and Review pages.
+
 ---
 
 ## File Structure
@@ -799,7 +841,7 @@ ai_extract_poc/
 ├── streamlit/
 │   ├── streamlit_app.py                   # Landing page + pipeline overview
 │   ├── config.py                          # Dynamic config (zero hardcoded values)
-│   ├── environment.yml                    # Container Runtime dependencies (plotly, pypdfium2)
+│   ├── snowflake.yml                      # Container Runtime dependencies (plotly, pypdfium2)
 │   ├── .streamlit/
 │   │   └── secrets.toml                   # Snowflake credentials (gitignored, create locally)
 │   └── pages/
@@ -885,10 +927,10 @@ ai_extract_poc/
 | E2E: `inner_text()` returns empty on data grid | Glide Data Grid renders in `<canvas>`, not DOM | Use `page.inner_text("body")` or click open selectbox dropdowns to expose text in DOM |
 | E2E: Test expects "Invoices" but sees "Contracts" | Selectbox default is alphabetically first doc type | Make assertions doc-type-agnostic or explicitly select the expected type first |
 | E2E: "Vendor" label not found | "Vendor" is INVOICE-specific; other doc types show different labels | Assert on universal labels like "Status" or select INVOICE before asserting |
-| Azure/GCP: `CREATE STREAMLIT` fails | Streamlit files not uploaded to stage | `PUT` all files (`.py`, `pyproject.toml`, `environment.yml`, `snowflake.yml`) before creating the app |
+| Azure/GCP: `CREATE STREAMLIT` fails | Streamlit files not uploaded to stage | `PUT` all files (`.py`, `pyproject.toml`, `snowflake.yml`) before creating the app |
 | Azure/GCP: `CREATE COMPUTE POOL` access denied | Running as app role, not ACCOUNTADMIN | Compute pools, network rules, and EAI require `USE ROLE ACCOUNTADMIN` |
 | PDF preview: "File not on stage" warning | Document registered in `RAW_DOCUMENTS` but PDF not uploaded to `@DOCUMENT_STAGE` | Re-run `deploy_poc.sh` or manually `PUT` the missing file. On GCP, multi-type docs (contracts, receipts, utility bills) may not have been uploaded if `data/invoices/` was the primary source. |
-| PDF preview: "Could not render document" | `session.file.get()` failed inside Container Runtime — often a stage path or permissions issue | Verify file exists: `SELECT * FROM DIRECTORY(@DOCUMENT_STAGE) WHERE RELATIVE_PATH = '<file>';`. Check that `pypdfium2` is in `environment.yml`. Confirm the compute pool is ACTIVE. |
+| PDF preview: "Could not render document" | `session.file.get()` failed inside Container Runtime — often a stage path or permissions issue | Verify file exists: `SELECT * FROM DIRECTORY(@DOCUMENT_STAGE) WHERE RELATIVE_PATH = '<file>';`. Check that `pypdfium2` is in `snowflake.yml`. Confirm the compute pool is ACTIVE. |
 | PDF preview: blank/missing on Azure or GCP | Stage has fewer files than `RAW_DOCUMENTS` (e.g., 100 vs 130) | Run `SELECT COUNT(*) FROM DIRECTORY(@DOCUMENT_STAGE);` vs `SELECT COUNT(*) FROM RAW_DOCUMENTS;`. Upload missing files with `PUT file://... @DOCUMENT_STAGE AUTO_COMPRESS=FALSE;` then `ALTER STAGE DOCUMENT_STAGE REFRESH;` |
 
 ---
@@ -2068,7 +2110,7 @@ SELECT e.file_name, e.raw_extraction FROM EXTRACTED_FIELDS e JOIN RAW_DOCUMENTS 
 
 ### 7. Cross-Cloud Deployment
 
-- **SQL scripts don't upload files.** Running `01_setup.sql` through `08_teardown.sql` creates database objects but does NOT upload Streamlit files to the stage. Each cloud requires explicit `PUT` of all files (`.py`, `pyproject.toml`, `environment.yml`, `snowflake.yml`) before `CREATE STREAMLIT ... FROM '@STAGE'` will work.
+- **SQL scripts don't upload files.** Running `01_setup.sql` through `08_teardown.sql` creates database objects but does NOT upload Streamlit files to the stage. Each cloud requires explicit `PUT` of all files (`.py`, `pyproject.toml`, `snowflake.yml`) before `CREATE STREAMLIT ... FROM '@STAGE'` will work.
 - **ACCOUNTADMIN is required for infrastructure, not the app.** Compute pools, network rules, and External Access Integrations all require `ACCOUNTADMIN`. The app role (`AI_EXTRACT_APP`) can't create them. Pattern: ACCOUNTADMIN creates infra + grants, then switch to app role for `CREATE STREAMLIT`.
 - **Test skip counts vary by data volume.** Azure/GCP with 100 documents skip ~142 tests that pass on AWS (130 documents). Skip guards like "at least N rows exist" cause this. The skipped tests aren't broken — they just lack the data to exercise those code paths.
 - **AWS runs slower because it runs more tests.** 990 actual executions vs 846 on Azure/GCP. Combined with more rows per query (130 vs 100 docs), AWS takes ~2x the wall-clock time. Per-test speed is comparable across clouds.
@@ -2143,7 +2185,7 @@ ALTER STAGE DOCUMENT_STAGE REFRESH;
 
 The Document Viewer page renders PDFs using `pypdfium2` inside Container Runtime. For it to work:
 
-1. **`pypdfium2`** must be listed in both `environment.yml` and `pyproject.toml`
+1. **`pypdfium2`** must be listed in both `snowflake.yml` and `pyproject.toml`
 2. **`PYPI_ACCESS_INTEGRATION`** EAI must exist and be granted to the Streamlit app
 3. **Compute pool** must be ACTIVE (`DESCRIBE COMPUTE POOL AI_EXTRACT_POC_POOL;`)
 4. **File must exist on stage** — the viewer now checks `DIRECTORY(@DOCUMENT_STAGE)` before attempting download

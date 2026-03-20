@@ -180,7 +180,8 @@ def get_doc_type_labels(session, doc_type: str = "INVOICE") -> dict:
     try:
         rows = session.sql(
             f"SELECT field_labels FROM {DB}.DOCUMENT_TYPE_CONFIG "
-            f"WHERE doc_type = '{doc_type}'"
+            f"WHERE doc_type = ?",
+            params=[doc_type]
         ).collect()
         if rows:
             raw = rows[0]["FIELD_LABELS"]
@@ -212,7 +213,8 @@ def get_doc_type_config(session, doc_type: str) -> dict | None:
     try:
         rows = session.sql(
             f"SELECT * FROM {DB}.DOCUMENT_TYPE_CONFIG "
-            f"WHERE doc_type = '{doc_type}'"
+            f"WHERE doc_type = ?",
+            params=[doc_type]
         ).collect()
         if not rows:
             return None
@@ -274,7 +276,8 @@ def get_raw_extraction_fields(session, record_id: int) -> dict:
     try:
         rows = session.sql(
             f"SELECT raw_extraction FROM {DB}.EXTRACTED_FIELDS "
-            f"WHERE record_id = {record_id}"
+            f"WHERE record_id = ?",
+            params=[record_id]
         ).collect()
         if rows and rows[0]["RAW_EXTRACTION"]:
             return _parse_variant(rows[0]["RAW_EXTRACTION"])

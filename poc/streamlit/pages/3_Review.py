@@ -52,9 +52,11 @@ if st.session_state.save_result:
     st.subheader("Saved Records (Current Values)")
     st.caption("Live values from the view — your corrections are already applied")
 
-    id_list = ",".join(str(rid) for rid in result["record_ids"])
+    record_ids = result["record_ids"]
+    placeholders = ",".join(["?"] * len(record_ids))
     saved_df = session.sql(
-        f"SELECT * FROM {DB}.V_DOCUMENT_SUMMARY WHERE record_id IN ({id_list})"
+        f"SELECT * FROM {DB}.V_DOCUMENT_SUMMARY WHERE record_id IN ({placeholders})",
+        params=record_ids
     ).to_pandas()
 
     if len(saved_df) > 0:

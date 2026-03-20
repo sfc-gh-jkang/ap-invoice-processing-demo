@@ -267,7 +267,8 @@ if len(ledger_df) > 0:
                 file_name = file_row.iloc[0]["FILE_NAME"]
                 try:
                     stage_files = session.sql(
-                        f"SELECT RELATIVE_PATH FROM DIRECTORY(@{STAGE}) WHERE RELATIVE_PATH = '{file_name}'"
+                        f"SELECT RELATIVE_PATH FROM DIRECTORY(@{STAGE}) WHERE RELATIVE_PATH = ?",
+                        params=[file_name]
                     ).collect()
                     if not stage_files:
                         st.warning(

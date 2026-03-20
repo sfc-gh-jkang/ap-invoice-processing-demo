@@ -94,12 +94,36 @@ def _parse_field_names(prompt_text):
     return [f.strip().rstrip('.') for f in match.group(1).split(',')]
 
 
+def _sanitize_filename(name: str) -> str:
+    """Strip path traversal and SQL-dangerous characters from a filename.
+
+    Allows only alphanumeric, dots, hyphens, underscores, and spaces.
+    Raises ValueError if the result is empty or starts with a dot.
+    """
+    clean = re.sub(r'[^a-zA-Z0-9._\- ]', '_', name)
+    clean = clean.lstrip('.')
+    if not clean:
+        raise ValueError("Invalid filename after sanitization")
+    return clean
+
+
+def _sql_escape(value: str) -> str:
+    """Escape a string for use in a SQL single-quoted literal.
+
+    Doubles single quotes to prevent SQL injection.
+    """
+    return value.replace("'", "''")
+
+
 def _cleanup_test_state(session_obj):
     """Remove staged test file and clear session_state."""
     fname = st.session_state.get('test_ext_fname')
     if fname:
         try:
-            session_obj.sql(f"REMOVE @{DB}.DOCUMENT_STAGE/{fname}").collect()
+            safe_fname = _sanitize_filename(fname)
+            session_obj.sql(
+                f"REMOVE @{DB}.DOCUMENT_STAGE/{safe_fname}"
+            ).collect()
         except Exception:
             pass
     for key in ('test_ext_result', 'test_ext_fname', 'test_ext_field_names',
@@ -333,7 +357,7 @@ if configs:
                     if st.button("Run Test Extraction", type="primary"):
                         with st.spinner("Uploading and running AI_EXTRACT..."):
                             try:
-                                test_fname = test_file.name
+                                test_fname = _sanitize_filename(test_file.name)
                                 test_file.seek(0)
                                 tmp_dir = tempfile.mkdtemp()
                                 local_path = os.path.join(tmp_dir, test_fname)
@@ -358,9 +382,10 @@ if configs:
                                         )
                                     prompt_obj = '{' + ', '.join(prompt_parts) + '}'
 
+                                    safe_fname_sql = _sql_escape(test_fname)
                                     result = session.sql(f"""
                                         SELECT AI_EXTRACT(
-                                            TO_FILE('@{DB}.DOCUMENT_STAGE', '{test_fname}'),
+                                            TO_FILE('@{DB}.DOCUMENT_STAGE', '{safe_fname_sql}'),
                                             {prompt_obj}
                                         ) AS extraction
                                     """).collect()
@@ -381,7 +406,7 @@ if configs:
                                     else:
                                         st.warning("No extraction result returned.")
                                         session.sql(
-                                            f"REMOVE @{DB}.DOCUMENT_STAGE/{test_fname}"
+                                            f"REMOVE @{DB}.DOCUMENT_STAGE/{_sanitize_filename(test_fname)}"
                                         ).collect()
                             except Exception as e:
                                 st.error(f"Test extraction failed: {e}")
@@ -515,10 +540,12 @@ if configs:
                                                 }
                                             }
                                             rf_sql = json.dumps(response_format)
+                                            safe_fname_sql = _sql_escape(test_fname)
+                                            safe_rf_sql = _sql_escape(rf_sql)
                                             tbl_result = session.sql(f"""
                                                 SELECT AI_EXTRACT(
-                                                    file => TO_FILE('@{DB}.DOCUMENT_STAGE', '{test_fname}'),
-                                                    responseFormat => PARSE_JSON('{rf_sql.replace("'", "''")}')
+                                                    file => TO_FILE('@{DB}.DOCUMENT_STAGE', '{safe_fname_sql}'),
+                                                    responseFormat => PARSE_JSON('{safe_rf_sql}')
                                                 ) AS extraction
                                             """).collect()
                                             if tbl_result:

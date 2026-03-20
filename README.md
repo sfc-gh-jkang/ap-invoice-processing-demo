@@ -325,7 +325,7 @@ convenience-store-accounts-payable/
     ├── streamlit_app.py           # Landing page (architecture, business value)
     ├── config.py                  # Dynamic environment config (CURRENT_DATABASE/SCHEMA)
     ├── pyproject.toml             # Dependencies + pytest config
-    ├── environment.yml            # Conda environment for container runtime
+    ├── snowflake.yml              # Container Runtime dependencies
     ├── pages/
     │   ├── 0_Dashboard.py         # KPI dashboard
     │   ├── 1_AP_Ledger.py         # Invoice ledger + drill-down
@@ -359,7 +359,7 @@ The `poc/` directory contains a standalone, reusable **AI_EXTRACT POC Kit** — 
 
 | Feature | Description |
 |---|---|
-| **Multi-document-type support** | Configuration-driven labels/prompts per document type via `DOCUMENT_TYPE_CONFIG` table (INVOICE, CONTRACT, RECEIPT, UTILITY_BILL) |
+| **Multi-document-type support** | Configuration-driven labels/prompts per document type via `DOCUMENT_TYPE_CONFIG` table (INVOICE, CONTRACT, RECEIPT, LEASE, UTILITY_BILL) |
 | **AI_EXTRACT output post-processing** | Normalizes dates, strips currency symbols, expands abbreviations, replaces "None" strings — because AI doesn't always follow formatting instructions |
 | **Confidence scoring** | Per-field `_confidence` metadata (0.0–1.0) added to `raw_extraction` VARIANT via `OBJECT_INSERT` |
 | **Review workflow** | Inline `st.data_editor` with append-only audit trail (`INVOICE_REVIEW` table) |
