@@ -388,3 +388,10 @@ See [DESIGN.md](DESIGN.md) for the original design specification — principles,
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+## Repository Owner
+
+- **Owner:** John Kang (john.kang@snowflake.com / [@sfc-gh-jkang](https://github.com/sfc-gh-jkang))
+- **Access requests:** Open a [CASEC Jira](https://snowflakecomputing.atlassian.net/) for access changes
+- **License:** Apache-2.0
+
